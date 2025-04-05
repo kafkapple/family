@@ -1,0 +1,147 @@
+# conf/config_with_categories.yaml
+yaml_path: ${hydra:runtime.cwd}/plans.yaml
+llm_provider: 'ollama'
+model_name: gemma3 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
+#hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf:latest     0f5688cf9681    9.4 GB    4 weeks ago    
+#hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF:latest 
+
+temperature: 0.7
+max_tokens: 2000
+example_count: 10  # 선택할 예시 문장 수
+categories:
+  - developmental_age_focused
+  - seasonal_life_events
+  - parent_caregiver_dialogue
+  - emotion_needs_understanding
+  - discipline_boundary_setting
+  - self_help_independence
+  - play_interaction
+  - media_related
+  - relationship_communication
+
+model:
+  type: ${llm_provider}
+  name: ${model_name}
+  parameters:
+    temperature: 0.6
+    max_tokens: 2000
+    top_p: 0.9
+    top_k: 20
+    repeat_penalty: 1.7
+    frequency_penalty: 0.5
+    presence_penalty: 0.5
+    timeout: 30
+    stop: null
+
+
+# Evaluation settings: Scoring and Problem Types
+
+# Scoring criteria definitions (from scoring.yaml)
+scoring_items: # Renamed from 'items' to avoid potential conflicts
+  emotional_relationship:
+    name: "정서적 관계"
+    description: "부모와 아이 사이의 정서적 유대감, 공감, 친밀도를 통합적으로 평가"
+    weight: 1.0
+    aspects:
+      - "감정 표현과 수용"
+      - "상호 이해와 공감"
+      - "대화의 친밀도"
+    scoring_guide:
+      5: "깊은 정서적 교감과 상호 이해가 매우 뛰어남"
+      4: "안정적인 정서적 관계가 형성됨"
+      3: "기본적인 정서적 교류는 있으나 깊이가 부족"
+      2: "제한적인 정서적 교류"
+      1: "정서적 교류가 매우 부족"
+
+  active_listening:
+    name: "적극적 경청"
+    description: "대화 내용에 대한 이해와 반응의 적절성"
+    weight: 1.0
+    aspects:
+      - "경청 태도"
+      - "반응의 적절성"
+      - "이해 확인"
+    scoring_guide:
+      5: "집중하여 경청하고 적절한 반응을 보임"
+      4: "대체로 잘 듣고 반응함"
+      3: "부분적으로 경청하나 일관성 부족"
+      2: "소극적이거나 부적절한 반응"
+      1: "경청하지 않거나 무반응"
+
+  communication_clarity:
+    name: "의사소통 명확성"
+    description: "메시지 전달의 명확성과 이해도"
+    weight: 1.0
+    aspects:
+      - "메시지의 명확성"
+      - "상호 이해도"
+      - "대화의 효율성"
+    scoring_guide:
+      5: "매우 명확하고 효과적인 의사소통"
+      4: "대체로 명확한 의사소통"
+      3: "기본적인 의사소통은 가능"
+      2: "의사소통이 다소 불명확"
+      1: "의사소통이 매우 불명확"
+
+  conflict_resolution:
+    name: "갈등 해결"
+    description: "갈등 상황에서의 대화 방식과 해결 능력"
+    weight: 1.0
+    aspects:
+      - "갈등 상황 인식"
+      - "해결 방식의 적절성"
+      - "상호 존중"
+    scoring_guide:
+      5: "효과적이고 건설적인 갈등 해결"
+      4: "대체로 적절한 갈등 해결"
+      3: "기본적인 갈등 관리는 가능"
+      2: "갈등 해결에 어려움"
+      1: "갈등 해결 능력 부족"
+
+output_formats: 
+  scoring:
+    template: |
+      {
+        "scoring": {
+          "emotional_relationship": 0,
+          "active_listening": 0,
+          "communication_clarity": 0,
+          "conflict_resolution": 0
+        },
+        "explanation": {
+          "emotional_relationship": "점수 설명",
+          "active_listening": "점수 설명",
+          "communication_clarity": "점수 설명",
+          "conflict_resolution": "점수 설명"
+        }
+      }
+
+  category_selection:
+    template: |
+      {
+        "selected_categories": [
+          {
+            "category_name": "카테고리명",
+            "priority": "1-3 우선순위",
+            "selection_reason": "선정 이유"
+          }
+        ]
+      }
+
+  plan_recommendation:
+    template: |
+      {
+        "conversation_analysis": {
+          "overall_analysis": "전반적 분석",
+          "strengths": "강점",
+          "improvement_points": "개선점"
+        },
+        "recommended_plans": [
+          {
+            "category": "카테고리",
+            "plan_name": "플랜명",
+            "reason": "추천 이유",
+            "expected_effect": "기대 효과"
+          }
+        ]
+      } 
