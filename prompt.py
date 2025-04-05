@@ -27,9 +27,10 @@ def generate_llm_prompts(df_category):
         {i+1}.
         Category Name: {row['CategoryName']}
         Description: {row['concatenated_descriptions']}\n
+        Related Keywords: {row['keyword']}
+        
         """
-        # Related Keywords: {row['keyword']}
-        #llm_prompts[row['id_category']] = prompt
+# llm_prompts[row['id_category']] = prompt
         llm_prompts += prompt
 
     return llm_prompts
