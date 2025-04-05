@@ -19,6 +19,7 @@ import pandas as pd
 from logger import save_llm_prompts_to_txt, parse_and_save_json_results
 from prompt import  create_counselor_family_prompt, create_survey_persona_prompt, generate_llm_prompts
 from persona_parser import PriorityInterest, FamilyPersonaInfo, FamilyPersonaParser
+import time
 
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
@@ -204,6 +205,29 @@ def save_dialogue_to_file(output_path: str, dialogue_data: Dict[str, Any], categ
         # JSON 데이터 저장
         json.dump(dialogue_data, f, ensure_ascii=False, indent=2)
 
+def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """LLM을 호출하고 응답을 JSON으로 파싱합니다. 실패 시 재시도합니다."""
+    retries = 0
+    while retries < max_retries:
+        response = get_llm_response(prompt, llm_client)
+        if not response:
+            print(f"LLM 응답 없음. 재시도 ({retries + 1}/{max_retries})...")
+            retries += 1
+            time.sleep(1) # 간단한 지연 추가
+            continue
+
+        parsed_data = parse_json_response(response)
+        if parsed_data:
+            return parsed_data
+        else:
+            print(f"JSON 파싱 실패. 재시도 ({retries + 1}/{max_retries})...")
+            print(f"실패한 응답: {response[:500]}...") # 실패한 응답 일부 로깅
+            retries += 1
+            time.sleep(1) # 간단한 지연 추가
+            
+    print(f"최대 재시도 횟수({max_retries}) 도달. JSON 파싱 최종 실패.")
+    return None
+
 @hydra.main(config_path="conf", config_name="config_with_categories")
 def main(cfg: AppConfig) -> None:
     """메인 함수: 데이터 로드, 플랜 선택, 대화 생성을 수행합니다."""
@@ -240,7 +264,8 @@ def main(cfg: AppConfig) -> None:
     # plans_category = data.get("plans", {})  # plans
     cols_examples = [col for col in df_plan.columns if 'example_' in col]
     from map_survey import FamilyPersona
-    family = FamilyPersona(csv_path="d:/dev/_playground/data/VirtualSurvey.csv")
+    csv_path = cwd / "data" / "VirtualSurvey.csv"
+    family = FamilyPersona(csv_path=csv_path)
     for i in tqdm(range(family.get_persona_count())):
         print(f"\n================================Family {i}================================")
 
@@ -259,20 +284,25 @@ def main(cfg: AppConfig) -> None:
 
 
     # LLM을 사용하여 대화 생성
-        if cfg.llm_provider.lower() == "openai":
-            #response = generate_dialogue_with_openai(prompt, cfg)
-            response_family= get_llm_response(prompt_family, llm_client)
-        elif cfg.llm_provider.lower() == "ollama":
-            response_family= get_llm_response(prompt_family, llm_client)
-            #response = generate_dialogue_with_ollama(prompt, cfg)
-        else:
-            raise ValueError(f"지원되지 않는 LLM 제공자: {cfg.llm_provider}")
+        family_data = call_llm_and_parse_json(prompt_family, llm_client)
         
-        # JSON 응답 파싱
-        family_data = parse_json_response(response_family)
-        print(f"====================Family Data===================\n{family_data}")
+        # JSON 응답 파싱 및 유효성 검사
+        if family_data is None:
+            print(f"Family {i}: 가족 데이터 생성 최종 실패 (JSON 파싱/LLM 응답 없음). 다음 가족으로 넘어갑니다.")
+            continue # 다음 루프 반복으로 이동
+
+        category_id = family_data.get("category")
+        valid_categories = df['CategoryName'].unique().tolist()
+
+        if not category_id or category_id not in valid_categories:
+            print(f"Family {i}: LLM이 유효하지 않은 카테고리 반환 '{category_id}'. 다음 가족으로 넘어갑니다.")
+            print(f"유효한 카테고리 목록: {valid_categories}")
+            print(f"LLM 응답: {family_data}")
+            continue # 다음 루프 반복으로 이동
+            
+        print(f"====================Family Data==================={family_data}")
         
-        category_id = family_data.get("category", '')
+        # category_id = family_data.get("category", '') # 위에서 이미 처리
         print(f"\n=== 카테고리: {category_id} ===")
         
         output_file = os.path.join(output_family_path, f"1_family_data_survey_{i}_cat_{category_id}_{model_name}_{timestamp}.json")
@@ -303,17 +333,7 @@ def main(cfg: AppConfig) -> None:
                 print(f"Prompting: {prompt}\n")
                 
                 # LLM을 사용하여 대화 생성
-                if cfg.llm_provider.lower() == "openai":
-                    #response = generate_dialogue_with_openai(prompt, cfg)
-                    response= get_llm_response(prompt, llm_client)
-                elif cfg.llm_provider.lower() == "ollama":
-                    response= get_llm_response(prompt, llm_client)
-                    #response = generate_dialogue_with_ollama(prompt, cfg)
-                else:
-                    raise ValueError(f"지원되지 않는 LLM 제공자: {cfg.llm_provider}")
-                
-                # JSON 응답 파싱
-                dialogue_data = parse_json_response(response)
+                dialogue_data = call_llm_and_parse_json(prompt, llm_client)
                 
                 if dialogue_data:
                     print(f"생성된 대화 데이터:")
@@ -332,6 +352,9 @@ def main(cfg: AppConfig) -> None:
                     print(f"\n대화가 '{output_file}'에 저장되었습니다.")
                 else:
                     print("대화 생성에 실패했습니다.")
+                    continue # 대화 생성 실패 시 다음 plan으로 넘어감 (스코어링 건너뛰기)
+
+                # --- 스코어링 로직 시작 --- (for plan 루프 안으로 이동)
                 from prompt import get_scoring_prompt
                 scoring_items_dict = load_data_from_cfg(cfg, 'scoring_items', dict, {})
                 scoring_criteria_list = []
@@ -341,52 +364,50 @@ def main(cfg: AppConfig) -> None:
                             scoring_criteria_list.append({'id': item_id, **item_data})
 
                 # 스코어링 부분 수정
-                if dialogue_data and "dialogue" in dialogue_data:
-                    # 대화 데이터 포맷팅
-                    formatted_dialogue = format_dialogue_for_scoring(dialogue_data)
-                    if formatted_dialogue and formatted_dialogue != "[대화 데이터 비어있음]":
-                        scoring_template_str = load_template_str(cfg, 'output_formats.scoring.template')
-                        if scoring_template_str:
-                            prompt = get_scoring_prompt(
-                                dialogue=formatted_dialogue,
-                                scoring_criteria=scoring_criteria_list,
-                                output_template_str=scoring_template_str
+                # if dialogue_data and "dialogue" in dialogue_data: # dialogue_data 존재는 위에서 확인
+                # 대화 데이터 포맷팅
+                formatted_dialogue = format_dialogue_for_scoring(dialogue_data)
+                if formatted_dialogue and formatted_dialogue != "[대화 데이터 비어있음]":
+                    scoring_template_str = load_template_str(cfg, 'output_formats.scoring.template')
+                    if scoring_template_str:
+                        prompt = get_scoring_prompt(
+                            dialogue=formatted_dialogue,
+                            scoring_criteria=scoring_criteria_list,
+                            output_template_str=scoring_template_str
+                        )
+                        
+                        # 디버깅을 위한 로깅 추가
+                        print("\n=== 스코어링 프롬프트 ===")
+                        # print(formatted_dialogue) # 너무 길어서 주석 처리, 필요 시 해제
+                        print(f"스코어링 기준 개수: {len(scoring_criteria_list)}")
+                        print("========================\n")
+                        
+                        prompt_scoring_path = os.path.join(
+                            prompt_path, 
+                            f"3_prompt_scoring_{i}_cat_{category_id}_plan_{plan}_{model_name}_{timestamp}.txt" # plan 변수 사용
+                        )
+                        save_llm_prompts_to_txt(prompt, prompt_scoring_path)
+                        print(f"스코어링 프롬프트 생성됨: {prompt_scoring_path}")
+                        
+                        # LLM 응답 받기
+                        scoring_data = call_llm_and_parse_json(prompt, llm_client)
+                        if scoring_data:
+                            output_file = os.path.join(
+                                output_dir, 
+                                f"3_scoring_{i}_plan_{plan}_{model_name}_{timestamp}.json" # plan 변수 사용
                             )
-                            
-                            # 디버깅을 위한 로깅 추가
-                            print("\n=== 스코어링 프롬프트 ===")
-                            print(formatted_dialogue)
-                            print("========================\n")
-                            
-                            prompt_scoring_path = os.path.join(
-                                prompt_path, 
-                                f"3_prompt_scoring_{i}_cat_{category_id}_{model_name}_{timestamp}.txt"
-                            )
-                            save_llm_prompts_to_txt(prompt, prompt_scoring_path)
-                            print(f"스코어링 프롬프트 생성됨: {prompt_scoring_path}")
-                            
-                            # LLM 응답 받기
-                            response = get_llm_response(prompt, llm_client)
-                            if response:
-                                scoring_data = parse_json_response(response)
-                                if scoring_data:
-                                    output_file = os.path.join(
-                                        output_dir, 
-                                        f"3_scoring_{i}_plan_{plan}_{model_name}_{timestamp}.json"
-                                    )
-                                    save_response_to_file(output_file, scoring_data, i)
-                                    print(f"스코어링 결과 저장됨: {output_file}")
-                                else:
-                                    print("스코어링 데이터 파싱 실패")
-                            else:
-                                print("LLM 응답 실패")
+                            save_response_to_file(output_file, scoring_data, i)
+                            print(f"스코어링 결과 저장됨: {output_file}")
                         else:
-                            print("스코어링 템플릿 로드 실패")
+                            print("스코어링 데이터 파싱 실패")
                     else:
-                        print("대화 데이터 포맷팅 실패")
+                        print("스코어링 템플릿 로드 실패")
                 else:
-                    print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
-                print("\n" + "="*50 + "\n")
+                    print("대화 데이터 포맷팅 실패")
+                # else: # dialogue_data가 없거나 dialogue 키가 없는 경우는 위에서 continue로 처리됨
+                #     print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
+                # --- 스코어링 로직 끝 ---
+                print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
         
         except Exception as e:
             print(f"카테고리 '{category_id}' 처리 중 오류 발생: {e}")
