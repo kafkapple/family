@@ -6,26 +6,26 @@ import yaml
 import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf, DictConfig
-
 from dataclasses import dataclass
 import requests
 from dotenv import load_dotenv
 import re
-from llm_client import create_llm_client
-from llm_interface import get_llm_response
+import time
 from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
-from logger import save_llm_prompts_to_txt, parse_and_save_json_results
-from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info
-import time
+from src.llm_client import create_llm_client
+from src.llm_interface import get_llm_response
+from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
+from src.prep_map_category import level3_to_english
+from src.prep_map_survey import FamilyPersona
+from src.prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
 
 def sanitize_model_name(model: str) -> str:
     """Clean model name for use as file name"""
     return re.sub(r'[^\w\-\.]', '_', model.lower())
-
 
 # Helper function to load template string from config
 def load_template_str(cfg: DictConfig, key: str) -> str:
@@ -407,7 +407,7 @@ def main(cfg: AppConfig) -> None:
 
     # plans_category = data.get("plans", {})  # plans
     
-    from prep_map_survey import FamilyPersona
+    
     csv_path = cwd / "data" / "VirtualSurvey.csv"
     family = FamilyPersona(csv_path=csv_path)
     df_scores = pd.DataFrame()
@@ -454,8 +454,7 @@ def main(cfg: AppConfig) -> None:
         save_response_to_file(output_file, family_data, i)
 
         # prep_map_category 임포트 위치 변경 (필요 시점)
-        from prep_map_category import level3_to_english
-
+        
         try:
             # df_plan 필터링 시 category_id 대신 category_name 사용
             df_plans = df_plan[df_plan['CategoryName_English']==category_name]
@@ -618,7 +617,8 @@ def main(cfg: AppConfig) -> None:
             if not category_ids:
                 print(f"Family {i}: 유효한 추천 카테고리 ID를 찾을 수 없습니다. 플랜 추천을 건너뛰니다.")
                 continue
-
+            if len(category_ids) >3:
+                category_ids = category_ids[:3]
             print(f"추천된 유효 카테고리 ID 목록: {category_ids}")
             plans_info = df_plan[df_plan['id_category'].isin(category_ids)]
             relevant_plans_info = gen_plan_info(plans_info)

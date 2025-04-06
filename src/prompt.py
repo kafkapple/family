@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 import json
 
-
+# - 전문가 경험, 가족 페르소나, 도움이 될 수 있는 코칭 플랜 정보를 종합해 고려합니다.
 role = """
 # Role
 - 당신은 수십 년간 부모와 아이, 가족 간의 갈등 및 부정적인 대화를 관찰해온 심리 상담 전문가 입니다.
@@ -73,10 +73,9 @@ def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
 {role}
 
 # Instruction
-- 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
-- 단순히 첫 번째 관심사에만 집중하지 말고, 2, 3번째 관심사, 키워드, 맥락, 카테고리 설명을 함께 파악하세요.
 - 가장 관련성이 높은 카테고리 하나를 선택하고, 그 카테고리의 **ID(정수)** 를 응답 JSON에 포함시키세요.
 - 카테고리 목록([Available Categories])에 제공된 ID 중에서만 선택해야 합니다.
+- 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
 - **`explanation` 필드는 반드시 한국어로만 작성해야 합니다. 영어 단어나 문장을 사용하지 마세요.**
 
 # Context
@@ -143,13 +142,13 @@ def create_counselor_family_prompt(i_persona, category_name: str, ii_df_plans) -
     prompt_template = """
 {role}
 # Instruction
-- 자주 경험했던 부모와 아이, 또는 양육자 간의 부정적인 대화를 떠올려 자연스럽게 재구성해 주세요.
+- 자주 경험했던 부모와 아이, 또는 양육자 간의 다양한 갈등, 부정적인 대화를 떠올려 자연스럽게 재구성해 주세요.
 - 대화는 총 5 ~ 15 턴 내외로 생성해 주세요.
+- 이모지, 특수 문자 등은 사용하지 않습니다.
 - 모두 한국어로 작성해 주세요.
 
 # Context
-- 전문가 경험, 가족 페르소나, 도움이 될 수 있는 코칭 플랜 정보를 종합해 고려합니다.
-- 등장 인물은 양육자인 엄마, 아빠, 아이들, 주변 인물 중 맥락에 적절한 1-3인을 선택해 주세요.
+- 등장 인물은 양육자인 엄마, 아빠, 아이들, 주변 인물 중, 주어진 맥락에 적절한 1-3인을 선택해 주세요.
 - 특히 양육자 부모의 부정적인 태도가 잘 드러날 수록 좋습니다.
 - 아이의 나이는 주어진 정보를 바탕으로, 각 나이에 맞는 언어를 구사해야 합니다.
 - 모르는 경우 3세 근처로 가정합니다. (어휘가 부족하고 유창하지 않아야 합니다.)
@@ -244,24 +243,28 @@ def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_templ
 from typing import List, Dict, Any
 
 def get_category_prompt(prompt_category: str,
-                        conversation_summary: str, 
+                        conversation_summary: str, # 이 변수는 현재 프롬프트 내에서 사용되지 않음 (필요시 제거 또는 활용)
                         scoring_results: Dict[str, Any]):
-    """Generate prompt for coaching category recommendation"""
+    """Generate prompt for coaching category recommendation (지시 명확화)"""
     # Format evaluation results correctly from the expected structure
     formatted_evaluation = "평가 결과 분석 실패"
-    if isinstance(scoring_results, dict): 
+    if isinstance(scoring_results, dict):
         scoring_dict = scoring_results.get('scoring') # Get inner dict
         explanation_dict = scoring_results.get('explanation') # Get inner dict
-        
+
         # Check if both inner dicts exist and are dicts
         if isinstance(scoring_dict, dict) and isinstance(explanation_dict, dict):
             evaluation_lines = []
-            # Iterate through the keys (criteria IDs) of the scoring dictionary
-            for criterion_id in scoring_dict.keys():
-                score = scoring_dict.get(criterion_id, 'N/A') # Get score using key
-                explanation = explanation_dict.get(criterion_id, '설명 없음') # Get explanation using key
-                # Use criterion_id (key) in the formatted string
-                evaluation_lines.append(f"- {criterion_id} (점수: {score}/5): {explanation}") 
+            # Iterate through the keys (assumed to be index strings like '0', '1', ... based on scoring prompt)
+            # Need a way to map these index strings back to actual criterion IDs if needed, 
+            # but for display here, we might just use the explanations.
+            # Assuming scoring_index_to_id mapping is available or passed if needed elsewhere.
+            for index_key in explanation_dict.keys():
+                score = scoring_dict.get(index_key, 'N/A') # Get score using index key
+                explanation = explanation_dict.get(index_key, '설명 없음') # Get explanation using index key
+                # Ideally, map index_key back to criterion ID (e.g., using scoring_index_to_id)
+                # For now, just display index for simplicity in this prompt:
+                evaluation_lines.append(f"- 항목 {index_key} (점수: {score}/5): {explanation}") 
             
             if evaluation_lines:
                  formatted_evaluation = "\n".join(evaluation_lines)
@@ -272,51 +275,55 @@ def get_category_prompt(prompt_category: str,
     else:
         formatted_evaluation = f"평가 결과 타입 오류 (예상: dict, 실제: {type(scoring_results)})"
 
-    # Use a regular triple-quoted string, not an f-string
-    prompt = """
+    # 프롬프트 템플릿 수정 (지시 명확화)
+    prompt_template = """
 {role}
 # Instruction
-아래의 대화 분석 결과를 바탕으로, 가장 시급한 개선이 필요한 카테고리를 **1개 이상, 최대 3개까지** 선정해주세요.
-# Context
-## Evaluation Results
-{evaluation_results_placeholder} 
+**매우 중요:** 당신의 임무는 아래 제공된 [Evaluation Results]와 [Category Information] **두 가지 정보를 분석**하여, 개선이 가장 필요한 카테고리를 **1개 이상, 최대 3개까지** 선정하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
 
-# Category Information
-- 반드시 카테고리 정보를 참고하여 카테고리를 선정해야 합니다.
+**절대로 추가 정보를 요청하거나, JSON 형식 외의 다른 텍스트(예: "Okay, I'm ready...")를 출력하지 마세요.** 당신은 이미 필요한 모든 정보를 받았습니다.
+
+# Context
+
+[Evaluation Results]
+- 다음은 이전 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고하여 어떤 영역에 개선이 필요한지 파악하세요.
+{evaluation_results_placeholder}
+
+[Category Information] 
+- 아래 목록에서 개선이 필요하다고 판단되는 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 설명을 주의 깊게 살펴보세요.
 {prompt_category}
 
 # Output Format
 **[출력 형식 (매우 중요!)]**
-- 반드시 아래 명시된 **JSON 형식**으로만 응답해야 합니다.
+- **반드시** 아래 명시된 **JSON 형식**으로만 응답해야 합니다. 다른 텍스트는 절대 포함하지 마세요.
 - 최상위 키는 `"selected_categories"` (JSON 배열)와 `"overall_reason"` (문자열) 이어야 합니다.
 - `"selected_categories"` 배열 안에는 선택된 각 카테고리에 대한 **JSON 객체**가 포함됩니다.
-- 각 카테고리 객체는 반드시 `"id"`, `"name"`, `"priority"` (숫자 1-3), `"reason"` (문자열) 키를 가져야 합니다.
-- **객체와 객체 사이에는 반드시 쉼표(,)**를 사용하세요 (배열 마지막 객체 제외).
+- 각 카테고리 객체는 반드시 `"id"` (카테고리 정보에 명시된 ID), `"name"` (카테고리 이름), `"priority"` (숫자 1-3, 1이 가장 시급), `"reason"` (선정 이유, **반드시 평가 결과 내용 인용**) 키를 가져야 합니다.
+- 배열 내 객체와 객체 사이에는 반드시 쉼표(,)를 사용하세요 (마지막 객체 제외).
 - 모든 키와 문자열 값은 **큰따옴표("")**로 감싸야 합니다.
 
 **[정확한 JSON 구조 예시]**
 ```json
 {{
   "selected_categories": [
-    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1", "priority": 1, "reason": "선정 이유 1 (대화 내용 인용)"}},
-    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2", "priority": 2, "reason": "선정 이유 2 (대화 내용 인용)"}}
+    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1", "priority": 1, "reason": "선정 이유 1 (평가 결과 항목 X의 내용 '...'을 볼 때 시급히 개선 필요)"}},
+    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2", "priority": 2, "reason": "선정 이유 2 (평가 결과 항목 Y의 내용 '...' 관련하여 개선 필요)"}}
   ],
-  "overall_reason": "종합적인 선정 이유 요약"
+  "overall_reason": "종합적인 선정 이유 요약 (예: 평가 결과를 종합할 때 ID 1과 ID 2 카테고리 개선이 가장 중요하다고 판단됨)"
 }}
 ```
 
 [주의사항]
-- 반드시 실제 대화 내용과 평가 결과를 기반으로 카테고리를 선정하세요.
-- 우선순위는 1(가장 시급)~3(덜 시급) 사이의 숫자로 표시하세요.
-- 선정 이유는 구체적인 대화 내용을 인용하여 설명하세요.
+- 선정 이유는 반드시 **[Evaluation Results] 섹션에 제시된 구체적인 내용**을 근거로 작성하세요.
+- **다시 한번 강조합니다: 추가 질문이나 JSON 외의 응답은 절대 하지 마세요. 주어진 정보로 JSON만 생성하세요.**
 """
-    
+
     # Use .format() to insert all required values into the standard string
-    return prompt.format(
+    return prompt_template.format(
         role=role,
-        conversation_summary=conversation_summary,
         evaluation_results_placeholder=formatted_evaluation, # Insert the correctly formatted string
         prompt_category=prompt_category
+        # conversation_summary is not used in the template, so removed from .format()
     )
 
 def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
@@ -328,7 +335,7 @@ def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
     # 표준 문자열 사용 (f-string 아님)
     prompt_template = """
 {role}
-- 아래 정보들을 종합적으로 고려하여, 아이에게 가장 적합한 구체적인 코칭 플랜들을 추천하고 그 이유와 기대 효과를 설명해주세요.
+- 아래 정보들을 종합적으로 고려하여, 아이에게 가장 적합한 구체적인 코칭 플랜들을 우선 순위대로 추천하고 그 이유와 기대 효과를 설명해주세요.
 
 # Context
 ## Conversation Scoring
