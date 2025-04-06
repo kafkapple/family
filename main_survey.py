@@ -17,7 +17,7 @@ from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
 from logger import save_llm_prompts_to_txt, parse_and_save_json_results
-from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt
+from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt
 import time
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
@@ -365,9 +365,15 @@ def main(cfg: AppConfig) -> None:
     # --- 매핑 생성 완료 ---
 
     prompt_category = generate_llm_prompts(df)
-    output_family_path = cwd / Path("outputs") / Path(model_name) / Path("survey") 
-
-    os.makedirs(output_family_path, exist_ok=True)
+    output_path = cwd / Path("outputs") / Path(model_name) 
+    
+    output_persona_path = cwd / Path("outputs") / Path(model_name) / Path("1_persona")
+    output_dialogue_path = cwd / Path("outputs") / Path(model_name) / Path("2_dialogue")
+    output_scoring_path = cwd / Path("outputs") / Path(model_name) / Path("3_scoring")
+    os.makedirs(output_path, exist_ok=True)
+    os.makedirs(output_dialogue_path, exist_ok=True)
+    os.makedirs(output_scoring_path, exist_ok=True)
+    os.makedirs(output_persona_path, exist_ok=True)
     prompt_path = cwd / Path("outputs") / Path(model_name) / Path("prompt")
     os.makedirs(prompt_path, exist_ok=True)
     
@@ -406,7 +412,8 @@ def main(cfg: AppConfig) -> None:
             print(f"Family {i}: 가족 데이터 생성 최종 실패 (JSON 파싱/LLM 응답 없음). 다음 가족으로 넘어갑니다.")
             continue # 다음 루프 반복으로 이동
         category_index = family_data.get("category_index") # 정수 인덱스 가져오기
-        output_file = os.path.join(output_family_path, f"{index_persona}_Step_1_Cat_{category_index}_{name_param}.json")
+
+        output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{category_index}_{name_param}.json")
         save_response_to_file(output_file, family_data, i)
         # valid_categories = df['CategoryName_English'].unique().tolist() # 매핑으로 대체
 
@@ -458,11 +465,11 @@ def main(cfg: AppConfig) -> None:
                     print(json.dumps(dialogue_data, ensure_ascii=False, indent=2))
                     
                     # 생성된 대화를 파일에 저장
-                    output_dir = os.path.join(output_family_path, category_id)
+                    #output_dir = os.path.join(output_family_path, category_id)
                     
-                    os.makedirs(output_dir, exist_ok=True)
+                    #os.makedirs(output_dir, exist_ok=True)
                     
-                    output_file = os.path.join(output_dir, f"{index_plan_dialogue}.json")
+                    output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}.json")
                     save_dialogue_to_file(output_file, dialogue_data, category_id, plan, examples)
                     # output_file = os.path.join(output_dir, f"survey_{i}_cat_{category_id}_plan_{plan_name}_Prompt_{plan.get('id')}_{model_name}_{timestamp}.json")
                     # save_dialogue_to_file(output_file, prompt, category_id, plan.get('id', ''), examples)
@@ -517,7 +524,7 @@ def main(cfg: AppConfig) -> None:
                             # 우선은 LLM이 정확한 인덱스 키를 반환한다고 가정하거나,
                             # 필요시 아래 scoring_data 처리 부분에서 직접 검증/수정 로직 추가
                             output_file = os.path.join(
-                                output_dir,
+                                output_scoring_path,
                                 f"{index_plan_scoring}_scoring.json"
                             )
                             save_response_to_file(output_file, scoring_data, i)
@@ -533,7 +540,7 @@ def main(cfg: AppConfig) -> None:
                             df_i['plan_index'] = index_plan
                             df_i['plan_name'] = plan
                             
-                            df_scores = pd.concat([df_i, df_scores], ignore_index=True)
+                            df_scores = pd.concat([df_scores, df_i], ignore_index=True)
             
                             print(f"스코어링 결과 저장됨: {output_file}")
                         else:
@@ -546,13 +553,21 @@ def main(cfg: AppConfig) -> None:
                 #     print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
                 # --- 스코어링 로직 끝 ---
                 print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
+        scoring_template_str = load_template_str(cfg, 'output_formats.scoring.template')
+        prompt = get_category_prompt(
+                conversation_summary=dialogue_data,
+                scoring_results=scoring_data, # Pass the original dictionary
+                output_template=scoring_template_str 
+            )
+        prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_{name_param}_prompt.txt")
+        save_llm_prompts_to_txt(prompt, prompt_category_path)
 
         
         except Exception as e:
             print(f"카테고리 '{category_id}' 처리 중 오류 발생: {e}")
             import traceback
             traceback.print_exc()
-    df_scores.to_csv(os.path.join(output_family_path, f"scores.csv"), encoding='utf-8-sig', index=True)
+    df_scores.to_csv(output_path / Path("survey_with_scoring.csv"), encoding='utf-8-sig', index=True)
     
 if __name__ == "__main__":
     main()
