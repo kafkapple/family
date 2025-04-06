@@ -17,7 +17,7 @@ from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
 from logger import save_llm_prompts_to_txt, parse_and_save_json_results
-from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt
+from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info
 import time
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
@@ -255,13 +255,30 @@ def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 7, 
     return None
 
 # --- 매핑 함수 정의 --- 
-def create_category_mappings(df_category: pd.DataFrame) -> Tuple[Dict[int, str], Dict[str, int]]:
-    """카테고리 DataFrame에서 인덱스 <-> 이름 매핑을 생성합니다."""
-    valid_categories = df_category['CategoryName_English'].unique().tolist()
-    category_index_to_name = {i: name for i, name in enumerate(valid_categories)}
-    category_name_to_index = {name: i for i, name in category_index_to_name.items()}
-    print(f"카테고리 매핑 생성 완료: {len(valid_categories)}개 ({category_index_to_name})")
-    return category_index_to_name, category_name_to_index
+def create_category_id_mappings(df_category: pd.DataFrame) -> Tuple[Dict[int, str], Dict[str, int]]:
+    """카테고리 DataFrame에서 id_category <-> CategoryName_English 매핑을 생성합니다."""
+    # CategoryName_English를 기준으로 중복 제거 후 매핑 생성
+    df_unique_categories = df_category.drop_duplicates(subset=['CategoryName_English'])
+    
+    # id_category 컬럼이 정수형인지 확인 (필요시 타입 변환)
+    if not pd.api.types.is_integer_dtype(df_unique_categories['id_category']):
+        print("경고: id_category 컬럼이 정수형이 아닙니다. 변환을 시도합니다.")
+        try:
+            df_unique_categories['id_category'] = df_unique_categories['id_category'].astype(int)
+        except ValueError as e:
+            print(f"오류: id_category를 정수형으로 변환할 수 없습니다: {e}")
+            raise
+            
+    category_id_to_name = pd.Series(
+        df_unique_categories.CategoryName_English.values, 
+        index=df_unique_categories.id_category
+    ).to_dict()
+    
+    category_name_to_id = {name: id_ for id_, name in category_id_to_name.items()}
+    
+    print(f"카테고리 ID <-> 이름 매핑 생성 완료: {len(category_id_to_name)}개")
+    # print(f"ID to Name: {category_id_to_name}") # 필요시 주석 해제
+    return category_id_to_name, category_name_to_id
 
 def create_scoring_mappings(scoring_criteria_list: List[Dict]) -> Tuple[Dict[int, str], Dict[str, int]]:
     """스코어링 기준 리스트에서 인덱스 <-> ID 매핑을 생성합니다."""
@@ -351,10 +368,10 @@ def main(cfg: AppConfig) -> None:
 
     map_plan = df_plan[['id_plan', 'PlanName_English']]
 
-    # --- 매핑 생성 (함수 호출) --- 
-    category_index_to_name, category_name_to_index = create_category_mappings(df)
+    # --- 매핑 생성 (함수 호출, 변수명 변경) --- 
+    category_id_to_name, category_name_to_id = create_category_id_mappings(df)
     
-    # 스코어링 기준 로드 및 매핑 생성
+    # 스코어링 기준 로드 및 매핑 생성 (여기는 인덱스(0,1,2..) 사용 유지)
     scoring_items_dict = load_data_from_cfg(cfg, 'scoring_items', dict, {})
     scoring_criteria_list = []
     if scoring_items_dict:
@@ -364,16 +381,20 @@ def main(cfg: AppConfig) -> None:
     scoring_index_to_id, scoring_id_to_index = create_scoring_mappings(scoring_criteria_list)
     # --- 매핑 생성 완료 ---
 
-    prompt_category = generate_llm_prompts(df)
+    prompt_category_info = generate_llm_prompts(df) # 함수명 변경 고려 (이제 프롬프트 전체가 아님)
     output_path = cwd / Path("outputs") / Path(model_name) 
     
     output_persona_path = cwd / Path("outputs") / Path(model_name) / Path("1_persona")
     output_dialogue_path = cwd / Path("outputs") / Path(model_name) / Path("2_dialogue")
     output_scoring_path = cwd / Path("outputs") / Path(model_name) / Path("3_scoring")
+    output_category_path = cwd / Path("outputs") / Path(model_name) / Path("4_category")
+    output_final_path = cwd / Path("outputs") / Path(model_name) / Path("5_final_plan")
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(output_dialogue_path, exist_ok=True)
     os.makedirs(output_scoring_path, exist_ok=True)
     os.makedirs(output_persona_path, exist_ok=True)
+    os.makedirs(output_category_path, exist_ok=True)
+    os.makedirs(output_final_path, exist_ok=True)
     prompt_path = cwd / Path("outputs") / Path(model_name) / Path("prompt")
     os.makedirs(prompt_path, exist_ok=True)
     
@@ -397,43 +418,47 @@ def main(cfg: AppConfig) -> None:
 
         i_family = family.get_persona_data(i)
 
-        prompt_family = create_survey_persona_prompt(i_family, prompt_category)
+        prompt_family = create_survey_persona_prompt(i_family, prompt_category_info)
         
         prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_1_{name_param}_prompt.txt")
         save_llm_prompts_to_txt(prompt_family, prompt_category_path)
         i_persona = i_family.get("persona")
 
-    # LLM을 사용하여 카테고리 인덱스 생성 + 키 검증
-        expected_category_keys = ["category_index", "explanation"]
+        # LLM을 사용하여 카테고리 ID 생성 + 키 검증
+        expected_category_keys = ["category_id", "explanation"] # 키 이름 변경: category_index -> category_id
         family_data = call_llm_and_parse_json(prompt_family, llm_client, expected_keys=expected_category_keys)
         
-        # JSON 응답 파싱 및 유효성 검사
         if family_data is None:
-            print(f"Family {i}: 가족 데이터 생성 최종 실패 (JSON 파싱/LLM 응답 없음). 다음 가족으로 넘어갑니다.")
-            continue # 다음 루프 반복으로 이동
-        category_index = family_data.get("category_index") # 정수 인덱스 가져오기
-
-        output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{category_index}_{name_param}.json")
-        save_response_to_file(output_file, family_data, i)
-        # valid_categories = df['CategoryName_English'].unique().tolist() # 매핑으로 대체
-
-        # 카테고리 인덱스 유효성 검사
-        if category_index is None or not isinstance(category_index, int) or category_index not in category_index_to_name:
-            print(f"Family {i}: LLM이 유효하지 않은 카테고리 인덱스 반환 '{category_index}' (타입: {type(category_index)}). 다음 가족으로 넘어갑니다.")
-            print(f"유효한 인덱스 범위: 0 ~ {len(category_index_to_name) - 1}")
-            print(f"LLM 응답: {family_data}")
-            continue # 다음 루프 반복으로 이동
-            
-        # 유효한 인덱스를 실제 카테고리 이름(문자열)으로 변환
-        category_id = category_index_to_name[category_index] # 이제 category_id는 실제 이름(문자열)
-        print(f"====================Family Data (Index: {category_index})==================={family_data}")
+            print(f"Family {i}: 가족 데이터 생성 최종 실패. 다음 가족으로 넘어갑니다.")
+            continue 
         
-        # category_id = family_data.get("category", '') # 인덱스 방식으로 변경됨
-        print(f"\n=== 카테고리: {category_id} (인덱스: {category_index}) ===")
+        selected_category_id = family_data.get("category_id") # 키 이름 변경: category_index -> category_id
+        
+        # 카테고리 ID 유효성 검사 (매핑에 존재하는지 확인)
+        if selected_category_id is None or not isinstance(selected_category_id, int) or selected_category_id not in category_id_to_name:
+            print(f"Family {i}: LLM이 유효하지 않은 카테고리 ID 반환 '{selected_category_id}' (타입: {type(selected_category_id)}). 다음 가족으로 넘어갑니다.")
+            print(f"유효한 ID 목록: {list(category_id_to_name.keys())}")
+            print(f"LLM 응답: {family_data}")
+            # 결과 저장 (오류 분석용)
+            output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_INVALID_{selected_category_id}_{name_param}.json")
+            save_response_to_file(output_file, family_data, i)
+            continue 
+            
+        # 유효한 ID를 사용하여 실제 카테고리 이름(문자열) 가져오기
+        category_name = category_id_to_name[selected_category_id] 
+        print(f"====================Family Data (ID: {selected_category_id})==================={family_data}")
+        print(f"\n=== 카테고리: {category_name} (ID: {selected_category_id}) ===")
+        
+        # 결과 저장 (정상 처리 시)
+        output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{selected_category_id}_{name_param}.json")
+        save_response_to_file(output_file, family_data, i)
+
+        # prep_map_category 임포트 위치 변경 (필요 시점)
         from prep_map_category import level3_to_english
 
         try:
-            df_plans = df_plan[df_plan['CategoryName_English']==category_id]
+            # df_plan 필터링 시 category_id 대신 category_name 사용
+            df_plans = df_plan[df_plan['CategoryName_English']==category_name]
         
             plans = df_plans['PlanName_English'].tolist() #plans_category.get(category_id, [])
             print(f"====Plans: {plans}")
@@ -444,13 +469,13 @@ def main(cfg: AppConfig) -> None:
                 print(f"\n=={plan}' 플랜을 찾았습니다.")
                 index_plan = int(map_plan[map_plan['PlanName_English'] == plan]['id_plan'].values[0])
 
-                index_plan_dialogue = f"{index_persona}_Step_2_dialogue_Cat_{category_index}_Plan_{index_plan}_{name_param}"
-                index_plan_scoring = f"{index_persona}_Step_3_scoring_Cat_{category_index}_Plan_{index_plan}_{name_param}"
+                index_plan_dialogue = f"{index_persona}_Step_2_dialogue_Cat_{selected_category_id}_Plan_{index_plan}_{name_param}"
+                index_plan_scoring = f"{index_persona}_Step_3_scoring_Cat_{selected_category_id}_Plan_{index_plan}_{name_param}"
                 # 해당 플랜의 데이터 필터링
                 i_df_plans = df_plans[df_plans['PlanName_English'] == plan]
            
                 # 심리 상담사 프롬프트 생성 (category_id는 이미 문자열로 변환됨)
-                prompt, examples = create_counselor_family_prompt(i_persona, category_id, i_df_plans)
+                prompt, examples = create_counselor_family_prompt(i_persona, category_name, i_df_plans)
                 prompt_dialouge_path = os.path.join(prompt_path, f"{index_plan_dialogue}_prompt.txt")
                 save_llm_prompts_to_txt(prompt, prompt_dialouge_path)
                 
@@ -470,7 +495,7 @@ def main(cfg: AppConfig) -> None:
                     #os.makedirs(output_dir, exist_ok=True)
                     
                     output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}.json")
-                    save_dialogue_to_file(output_file, dialogue_data, category_id, plan, examples)
+                    save_dialogue_to_file(output_file, dialogue_data, category_name, plan, examples)
                     # output_file = os.path.join(output_dir, f"survey_{i}_cat_{category_id}_plan_{plan_name}_Prompt_{plan.get('id')}_{model_name}_{timestamp}.json")
                     # save_dialogue_to_file(output_file, prompt, category_id, plan.get('id', ''), examples)
                     
@@ -530,13 +555,13 @@ def main(cfg: AppConfig) -> None:
                             save_response_to_file(output_file, scoring_data, i)
                             dict_score = scoring_data.get('scoring')
                             dict_explanation = scoring_data.get('explanation')
-                            dict_score = {scoring_index_to_id[int(key)]: value for key, value in dict_score.items()}
-                            dict_explanation = {'explanation_'+scoring_index_to_id[int(key)]: value for key, value in dict_explanation.items()}
+                            dict_score = {scoring_index_to_id[int(key)]: value for key, value in dict_score.items() if key.isdigit() and int(key) in scoring_index_to_id}
+                            dict_explanation = {'explanation_'+scoring_index_to_id[int(key)]: value for key, value in dict_explanation.items() if key.isdigit() and int(key) in scoring_index_to_id}
                             merged_dict = {**df_survey.iloc[i,:].to_dict(), **dict_score, **dict_explanation}
                             df_i = pd.DataFrame([merged_dict])
                             df_i['persona_index'] = i
-                            df_i['category_index'] = category_index
-                            df_i['category_name'] = category_id
+                            df_i['category_id'] = selected_category_id
+                            df_i['category_name'] = category_name
                             df_i['plan_index'] = index_plan
                             df_i['plan_name'] = plan
                             
@@ -553,18 +578,39 @@ def main(cfg: AppConfig) -> None:
                 #     print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
                 # --- 스코어링 로직 끝 ---
                 print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
-        scoring_template_str = load_template_str(cfg, 'output_formats.scoring.template')
-        prompt = get_category_prompt(
-                conversation_summary=dialogue_data,
-                scoring_results=scoring_data, # Pass the original dictionary
-                output_template=scoring_template_str 
-            )
-        prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_{name_param}_prompt.txt")
-        save_llm_prompts_to_txt(prompt, prompt_category_path)
+          
+            prompt = get_category_prompt(prompt_category=prompt_category_info,
+                    conversation_summary=dialogue_data,
+                    scoring_results=scoring_data, # Pass the original dictionary
+    
+                )
+            prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_Category_{name_param}_prompt.txt")
+            save_llm_prompts_to_txt(prompt, prompt_category_path)
+            category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['id', 'name', 'priority', 'reason'])
+            output_file = os.path.join(
+                                output_category_path,
+                                f"{index_persona}_Step_4_Category_{name_param}.json"
+                            )
+            save_response_to_file(output_file, category_data, i)
+            print(f"카테고리 결과 저장됨: {output_file}")
 
-        
+            ####### 플랜 추천 로직 시작 #######
+            category_ids = [int(i.get("id")) for i in category_data.get("selected_categories")]
+            plans_info = df_plan[df_plan['id_category'].isin(category_ids)]
+            relevant_plans_info = gen_plan_info(plans_info)
+            prompt_plan_path = os.path.join(prompt_path, f"{index_persona}_Step_5_Plan_{name_param}_prompt.txt")
+            prompt = get_plan_prompt(categories=category_data, scoring_results=scoring_data, relevant_plans_info=relevant_plans_info)
+            save_llm_prompts_to_txt(prompt, prompt_plan_path)
+            plan_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['conversation_analysis', 'recommended_plans'])
+            output_file = os.path.join(
+                                output_category_path,
+                                f"{index_persona}_Step_5_Plan_{name_param}.json"
+                            )
+            save_response_to_file(output_file, plan_data, i)
+            print(f"플랜 추천 결과 저장됨: {output_file}")
+
         except Exception as e:
-            print(f"카테고리 '{category_id}' 처리 중 오류 발생: {e}")
+            print(f"카테고리 '{category_name}' 처리 중 오류 발생: {e}")
             import traceback
             traceback.print_exc()
     df_scores.to_csv(output_path / Path("survey_with_scoring.csv"), encoding='utf-8-sig', index=True)
