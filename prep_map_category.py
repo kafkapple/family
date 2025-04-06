@@ -9,6 +9,7 @@ from pathlib import Path
 #     '생활': 'Life',
 #     '공감': 'Empathy'
 # }
+
 level2_to_english = {
     '발달_단계_연령_중심': 'developmental_age_focused',
     '시기_생활_이벤트_중심': 'life_event_focused',
@@ -19,43 +20,43 @@ level2_to_english = {
     '놀이_상호작용': 'play_interaction',
     '관계_소통_전반': 'relationship_communication'
 }
-
 level3_to_english = {
-    '체험판': 'Trial',
-    '첫걸음': 'FirstStep',
-    '3T': '3T',
-    'NVC': 'NVC',
-    '생애초기 (intro)': 'EarlyLifeIntro',
-    '두돌': 'TwoYearsOld',
-    '세돌': 'ThreeYearsOld',
-    '네돌 (outro)': 'FourYearsOldOutro',
-    '등하원 기관 적응 (만1세반)': 'Adaptation1Y',
-    '등하원 기관 적응 (만2세반)': 'Adaptation2Y',
-    '등하원 기관 적응 (유치원 만3세반)': 'Adaptation3Y',
-    '놀이터 (영아)': 'PlaygroundInfant',
-    '놀이터 (유아)': 'PlaygroundToddler',
-    '양육자 자기연결': 'ParentSelfConnection',
-    '육아 중 부부대화 (영아)': 'CoupleTalkInfant',
-    '육아 중 부부대화 (유아)': 'CoupleTalkToddler',
-    '육아번아웃 다루기': 'ParentBurnout',
-    '기관-동료양육자들과의 소통법': 'CommunicationWithPeers',
-    '감정과 욕구 (태담)': 'EmotionNeedsPrenatal',
-    '감정과 욕구 (발화 전)': 'EmotionNeedsPreSpeech',
-    '감정과 욕구 (발화 후)': 'EmotionNeedsPostSpeech',
-    '생활지도 (두돌 전)': 'LifeGuidancePreTwo',
-    '생활지도 (두돌에서 세돌 사이)': 'LifeGuidanceTwoToThree',
-    '생활지도 (세돌 이후)': 'LifeGuidancePostThree',
-    '형제남매친구 중재': 'SiblingMediation',
-    '자조능력 (이유식)': 'SelfHelpWeaning',
-    '자조능력 (배변)': 'SelfHelpToilet',
-    '자조능력 (생활습관)': 'SelfHelpHabits',
-    '놀이 상호작용 (발화 전)': 'PlayInteractionPreSpeech',
-    '놀이 상호작용 (발화 후)': 'PlayInteractionPostSpeech',
-    '미디어 입문': 'MediaIntro',
-    '미디어 갈등': 'MediaConflict',
-    '거절하기와 거절듣기': 'RejectionSkills',
-    '칭찬하기': 'GivingPraise'
+    '체험판': 'trial',
+    '첫걸음': 'first_step',
+    '3T': '3t',
+    'NVC': 'nvc',
+    '생애초기 (intro)': 'early_life_intro',
+    '두돌': 'two_years_old',
+    '세돌': 'three_years_old',
+    '네돌 (outro)': 'four_years_old_outro',
+    '등하원 기관 적응 (만1세반)': 'adaptation_1y',
+    '등하원 기관 적응 (만2세반)': 'adaptation_2y',
+    '등하원 기관 적응 (유치원 만3세반)': 'adaptation_3y',
+    '놀이터 (영아)': 'playground_infant',
+    '놀이터 (유아)': 'playground_toddler',
+    '양육자 자기연결': 'parent_self_connection',
+    '육아 중 부부대화 (영아)': 'couple_talk_infant',
+    '육아 중 부부대화 (유아)': 'couple_talk_toddler',
+    '육아번아웃 다루기': 'parent_burnout',
+    '기관-동료양육자들과의 소통법': 'communication_with_peers',
+    '감정과 욕구 (태담)': 'emotion_needs_prenatal',
+    '감정과 욕구 (발화 전)': 'emotion_needs_pre_speech',
+    '감정과 욕구 (발화 후)': 'emotion_needs_post_speech',
+    '생활지도 (두돌 전)': 'life_guidance_pre_two',
+    '생활지도 (두돌에서 세돌 사이)': 'life_guidance_two_to_three',
+    '생활지도 (세돌 이후)': 'life_guidance_post_three',
+    '형제남매친구 중재': 'sibling_mediation',
+    '자조능력 (이유식)': 'self_help_weaning',
+    '자조능력 (배변)': 'self_help_toilet',
+    '자조능력 (생활습관)': 'self_help_habits',
+    '놀이 상호작용 (발화 전)': 'play_interaction_pre_speech',
+    '놀이 상호작용 (발화 후)': 'play_interaction_post_speech',
+    '미디어 입문': 'media_intro',
+    '미디어 갈등': 'media_conflict',
+    '거절하기와 거절듣기': 'rejection_skills',
+    '칭찬하기': 'giving_praise'
 }
+
 
 cols_tags = ['Course_description', 'parenting_worries', 'parenting_env', 'tag']
 
@@ -175,14 +176,18 @@ def process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','Cate
         pd.DataFrame: Processed DataFrame with 'keyword' column and concatenated descriptions.
     """
 
-    # Extract unique keywords
-    keywords = set()
+    # Extract unique keywords by category
+    category_keywords = {}
     for group_name, group_df in df.groupby('id_category'):
+        # Initialize empty set for this category
+        category_keywords[group_name] = set()
         for tags in group_df['tag'].dropna():  # Handle NaN values
-            keywords.update(tags.split(', '))  # Split and update the set
+            category_keywords[group_name].update(tags.split(', '))  # Split and update the set
 
-    # Assign unique keywords to a new 'keyword' column (comma-separated string)
-    df['keyword'] = ', '.join(sorted(keywords))  # Sort for consistency
+    # Assign the unique keywords back to each row based on category
+    df['keyword'] = df['id_category'].apply(
+        lambda x: ', '.join(sorted(category_keywords.get(x, set())))  # Sort for consistency
+    )
 
     # Replace '-' values in 'example_' columns
     example_cols = [col for col in df.columns if 'example_' in col]
@@ -201,14 +206,12 @@ def process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','Cate
 
     # Add concatenated descriptions to the DataFrame
     df['concatenated_descriptions'] = df['id_category'].map(concatenated_descriptions)
-        # Define the columns to keep
-    
+        
     # Create a new DataFrame with only the desired columns
-    df_category =  df[columns_to_keep].drop_duplicates(subset=['id_category']).sort_values(by='id_category')
+    df_category = df[columns_to_keep].drop_duplicates(subset=['id_category']).sort_values(by='id_category')
     df_category.reset_index(drop=True, inplace=True)
 
     return df_category
-
 
 def main():
         

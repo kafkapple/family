@@ -1,7 +1,7 @@
 import os
 import random
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import yaml
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -17,10 +17,8 @@ from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
 from logger import save_llm_prompts_to_txt, parse_and_save_json_results
-from prompt import  create_counselor_family_prompt, create_survey_persona_prompt, generate_llm_prompts
-from persona_parser import PriorityInterest, FamilyPersonaInfo, FamilyPersonaParser
+from prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt
 import time
-
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
 
@@ -78,61 +76,60 @@ class AppConfig:
 
 cs = ConfigStore.instance()
 cs.store(name="config", node=AppConfig)
-def extract_examples_from_plan(df_plan_row, cols_examples):
-    """
-    플랜의 예시 문장들을 깔끔하게 추출합니다.
-    
-    Args:
-        df_plan_row (pd.Series): 플랜 데이터가 있는 DataFrame의 행
-        cols_examples (list): example_ 로 시작하는 컬럼명 리스트
-    
-    Returns:
-        list: 추출된 예시 문장들의 리스트
-    """
-    examples = []
-    for col in cols_examples:
-        example = df_plan_row[col].iloc[0]  # 첫 번째 행의 값만 가져옴
-        if isinstance(example, str) and example != '-':  # 문자열이고 '-'가 아닌 경우만
-            # 리스트 형태의 문자열에서 실제 문장만 추출
-            clean_example = example.strip("[]'").replace("'", "")
-            if clean_example:  # 빈 문자열이 아닌 경우만
-                examples.append(clean_example)
-    return examples
 
 def load_yaml_data(file_path: str) -> Dict[str, Any]:
     """YAML 파일에서 데이터를 로드합니다."""
     with open(file_path, 'r', encoding='utf-8') as file:
         return yaml.safe_load(file)
 def parse_json_response(response: str) -> Dict[str, Any]:
-    """LLM의 응답에서 JSON 부분을 추출하고 파싱합니다."""
+    """LLM의 응답에서 JSON 부분을 추출하고 파싱합니다. (개선됨)"""
+    if not response:
+        print("응답이 비어있습니다.")
+        return None
+
     try:
-        # 응답이 None이거나 빈 문자열인 경우 처리
-        if not response:
-            print("응답이 비어있습니다.")
-            return None
-            
-        # 정규 표현식을 사용하여 JSON 객체 추출
-        match = re.search(r"\{[\s\S]*\}", response, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError as e:
-                print(f"JSON 파싱 오류: {e}")
-                # JSON 문자열 정리 시도
-                cleaned_json = re.sub(r'[\n\r\t]', '', json_str)
-                return json.loads(cleaned_json)
+        # 1. Markdown 코드 블록 제거 (```json ... ```)
+        match_markdown = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", response, re.DOTALL)
+        if match_markdown:
+            json_str = match_markdown.group(1)
+            print("마크다운 코드 블록에서 JSON 추출 성공.")
         else:
-            print("응답에서 JSON 형식을 찾을 수 없습니다.")
-            print(f"원본 응답: {response}")
-            return None
+            # 2. 마크다운 없으면, 첫 '{'와 마지막 '}' 사이의 내용 추출 시도
+            match_brace = re.search(r"\{[\s\S]*\}", response, re.DOTALL)
+            if match_brace:
+                json_str = match_brace.group(0)
+                print("일반 텍스트에서 JSON 추출 시도.")
+            else:
+                print("응답에서 JSON 형식을 찾을 수 없습니다 (마크다운/중괄호 불일치).")
+                print(f"원본 응답 (앞 500자): {response[:500]}...")
+                return None
+
+        # 3. 추출된 문자열 파싱
+        try:
+            # 제어 문자 제거 (JSON에 유효하지 않은  -  범위, \t\n\r\f 제외)
+            # 정규식: 0-8, 11, 12, 14-31 범위의 제어 문자 제거
+            cleaned_json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', json_str)
+            
+            # 둥근 따옴표도 미리 교체
+            cleaned_json_str = cleaned_json_str.replace('"', '"').replace('"', '"')
+            
+            # 정리된 문자열로 파싱 시도
+            return json.loads(cleaned_json_str) 
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {e}")
+            # 오류 발생 시 원본과 정리된 문자열 일부를 비교 로깅
+            print(f"파싱 시도한 원본 문자열 (앞 500자): {json_str[:500]}...") 
+            if json_str != cleaned_json_str:
+                print(f"정리된 문자열 (앞 500자): {cleaned_json_str[:500]}...")
+            return None # 파싱 실패 시 최종 실패
+
     except Exception as e:
-        print(f"예상치 못한 오류 발생: {e}")
-        print(f"원본 응답: {response}")
+        print(f"JSON 추출/파싱 중 예상치 못한 오류 발생: {e}")
+        print(f"원본 응답 (앞 500자): {response[:500]}...")
         return None
 
 def format_dialogue_for_scoring(dialogue_data: Dict[str, Any]) -> str:
-    """대화 데이터를 스코어링용 포맷으로 변환합니다."""
+    """대화 데이터를 스코어링용 포맷으로 변환합니다. (키 오타 처리 추가)"""
     try:
         if not dialogue_data:
             print("대화 데이터가 비어있습니다")
@@ -142,14 +139,25 @@ def format_dialogue_for_scoring(dialogue_data: Dict[str, Any]) -> str:
             print(f"대화 데이터 타입 오류: {type(dialogue_data)}")
             return "[대화 데이터 형식 오류]"
             
+        # 'dialogue' 키를 먼저 시도하고, 없으면 오타인 'dialouge' 시도
         dialogue = dialogue_data.get('dialogue')
+        if dialogue is None:
+            dialogue = dialogue_data.get('dialouge') # 오타 키 시도
+            if dialogue is not None:
+                print("주의: 'dialogue' 키 대신 'dialouge' 키를 사용했습니다.")
+            else:
+                # 세 번째로 복수형 오타 'dialgues' 시도
+                dialogue = dialogue_data.get('dialgues') 
+                if dialogue is not None:
+                    print("주의: 'dialogue' 키 대신 복수형 오타 'dialgues' 키를 사용했습니다.")
+
         if not dialogue:
-            print("dialogue 필드가 없거나 비어있습니다")
+            print("dialogue/dialouge/dialgues 필드가 없거나 비어있습니다")
             print(f"사용 가능한 키: {dialogue_data.keys()}")
             return "[대화 데이터 비어있음]"
             
         if not isinstance(dialogue, list):
-            print(f"dialogue 필드 타입 오류: {type(dialogue)}")
+            print(f"dialogue/dialouge/dialgues 필드 타입 오류: {type(dialogue)}")
             return "[대화 턴 데이터 형식 오류]"
             
         formatted_turns = []
@@ -228,16 +236,33 @@ def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 3) 
     print(f"최대 재시도 횟수({max_retries}) 도달. JSON 파싱 최종 실패.")
     return None
 
+# --- 매핑 함수 정의 --- 
+def create_category_mappings(df_category: pd.DataFrame) -> Tuple[Dict[int, str], Dict[str, int]]:
+    """카테고리 DataFrame에서 인덱스 <-> 이름 매핑을 생성합니다."""
+    valid_categories = df_category['CategoryName_English'].unique().tolist()
+    category_index_to_name = {i: name for i, name in enumerate(valid_categories)}
+    category_name_to_index = {name: i for i, name in category_index_to_name.items()}
+    print(f"카테고리 매핑 생성 완료: {len(valid_categories)}개 ({category_index_to_name})")
+    return category_index_to_name, category_name_to_index
+
+def create_scoring_mappings(scoring_criteria_list: List[Dict]) -> Tuple[Dict[int, str], Dict[str, int]]:
+    """스코어링 기준 리스트에서 인덱스 <-> ID 매핑을 생성합니다."""
+    scoring_index_to_id = {i: criteria['id'] for i, criteria in enumerate(scoring_criteria_list)}
+    scoring_id_to_index = {criteria['id']: i for i, criteria in enumerate(scoring_criteria_list)}
+    print(f"스코어링 기준 매핑 생성 완료: {len(scoring_criteria_list)}개 ({scoring_index_to_id})")
+    return scoring_index_to_id, scoring_id_to_index
+# --- 매핑 함수 정의 끝 --- 
+
 @hydra.main(config_path="conf", config_name="config_with_categories")
 def main(cfg: AppConfig) -> None:
     """메인 함수: 데이터 로드, 플랜 선택, 대화 생성을 수행합니다."""
     print(f"구성: {OmegaConf.to_yaml(cfg)}")
     
-
     from datetime import datetime
     timestamp = datetime.now().timestamp()
     timestamp = datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S')
     model_name = sanitize_model_name(cfg.model_name)
+    name_param = f"{model_name}_{timestamp}"
 
     cwd = Path(hydra.utils.get_original_cwd())
     data_prep_path = cwd / Path('data/prep') 
@@ -246,6 +271,21 @@ def main(cfg: AppConfig) -> None:
     data_plan_path = data_prep_path / Path('preped_plan.csv') 
     df_plan = pd.read_csv(data_plan_path, encoding='utf-8-sig')
 
+    map_plan = df_plan[['id_plan', 'PlanName_English']]
+
+    # --- 매핑 생성 (함수 호출) --- 
+    category_index_to_name, category_name_to_index = create_category_mappings(df)
+    
+    # 스코어링 기준 로드 및 매핑 생성
+    scoring_items_dict = load_data_from_cfg(cfg, 'scoring_items', dict, {})
+    scoring_criteria_list = []
+    if scoring_items_dict:
+        for item_id, item_data in scoring_items_dict.items():
+            if isinstance(item_data, dict):
+                scoring_criteria_list.append({'id': item_id, **item_data})
+    scoring_index_to_id, scoring_id_to_index = create_scoring_mappings(scoring_criteria_list)
+    # --- 매핑 생성 완료 ---
+
     prompt_category = generate_llm_prompts(df)
     output_family_path = cwd / Path("outputs") / Path(model_name) / Path("survey") 
 
@@ -253,7 +293,6 @@ def main(cfg: AppConfig) -> None:
     prompt_path = cwd / Path("outputs") / Path(model_name) / Path("prompt")
     os.makedirs(prompt_path, exist_ok=True)
     
-
     # LLM API를 사용하도록 설정
     llm_client = create_llm_client(cfg)
     if llm_client is None:
@@ -262,72 +301,72 @@ def main(cfg: AppConfig) -> None:
         print("LLM 클라이언트 초기화 완료.")
 
     # plans_category = data.get("plans", {})  # plans
-    cols_examples = [col for col in df_plan.columns if 'example_' in col]
-    from map_survey import FamilyPersona
+    
+    from prep_map_survey import FamilyPersona
     csv_path = cwd / "data" / "VirtualSurvey.csv"
     family = FamilyPersona(csv_path=csv_path)
+    df_scores = pd.DataFrame()
+    df_survey  =  pd.read_csv(csv_path, encoding='utf-8-sig')
     for i in tqdm(range(family.get_persona_count())):
-        print(f"\n================================Family {i}================================")
+        index_persona = f"Persona_{i}"
+        print(f"\n================================{index_persona}================================")
 
         i_family = family.get_persona_data(i)
-         # 가족 정보 파싱
-        # parser = FamilyPersonaParser()
-        # family_info = parser.parse_family_info(i_family)
-        
-        # # 컨텍스트가 포함된 프롬프트 생성
-        # context = parser.create_context_prompt(family_info)
-        
+
         prompt_family = create_survey_persona_prompt(i_family, prompt_category)
-
-        prompt_category_path = os.path.join(prompt_path, f"1_prompt_category_{i}.txt")
+        
+        prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_1_{name_param}_prompt.txt")
         save_llm_prompts_to_txt(prompt_family, prompt_category_path)
+        i_persona = i_family.get("persona")
 
-
-    # LLM을 사용하여 대화 생성
+    # LLM을 사용하여 카테고리 인덱스 생성
         family_data = call_llm_and_parse_json(prompt_family, llm_client)
+
         
         # JSON 응답 파싱 및 유효성 검사
         if family_data is None:
             print(f"Family {i}: 가족 데이터 생성 최종 실패 (JSON 파싱/LLM 응답 없음). 다음 가족으로 넘어갑니다.")
             continue # 다음 루프 반복으로 이동
+        category_index = family_data.get("category_index") # 정수 인덱스 가져오기
+        output_file = os.path.join(output_family_path, f"{index_persona}_Step_1_Cat_{category_index}_{name_param}.json")
+        save_response_to_file(output_file, family_data, i)
+        # valid_categories = df['CategoryName_English'].unique().tolist() # 매핑으로 대체
 
-        category_id = family_data.get("category")
-        valid_categories = df['CategoryName'].unique().tolist()
-
-        if not category_id or category_id not in valid_categories:
-            print(f"Family {i}: LLM이 유효하지 않은 카테고리 반환 '{category_id}'. 다음 가족으로 넘어갑니다.")
-            print(f"유효한 카테고리 목록: {valid_categories}")
+        # 카테고리 인덱스 유효성 검사
+        if category_index is None or not isinstance(category_index, int) or category_index not in category_index_to_name:
+            print(f"Family {i}: LLM이 유효하지 않은 카테고리 인덱스 반환 '{category_index}' (타입: {type(category_index)}). 다음 가족으로 넘어갑니다.")
+            print(f"유효한 인덱스 범위: 0 ~ {len(category_index_to_name) - 1}")
             print(f"LLM 응답: {family_data}")
             continue # 다음 루프 반복으로 이동
             
-        print(f"====================Family Data==================={family_data}")
+        # 유효한 인덱스를 실제 카테고리 이름(문자열)으로 변환
+        category_id = category_index_to_name[category_index] # 이제 category_id는 실제 이름(문자열)
+        print(f"====================Family Data (Index: {category_index})==================={family_data}")
         
-        # category_id = family_data.get("category", '') # 위에서 이미 처리
-        print(f"\n=== 카테고리: {category_id} ===")
-        
-        output_file = os.path.join(output_family_path, f"1_family_data_survey_{i}_cat_{category_id}_{model_name}_{timestamp}.json")
-        save_response_to_file(output_file, family_data, i)
+        # category_id = family_data.get("category", '') # 인덱스 방식으로 변경됨
+        print(f"\n=== 카테고리: {category_id} (인덱스: {category_index}) ===")
+        from prep_map_category import level3_to_english
+
         try:
-            i_df_plans = df_plan[df_plan['CategoryName']==category_id]
+            df_plans = df_plan[df_plan['CategoryName_English']==category_id]
         
-            plans = i_df_plans['PlanName'].tolist() #plans_category.get(category_id, [])
+            plans = df_plans['PlanName_English'].tolist() #plans_category.get(category_id, [])
             print(f"====Plans: {plans}")
+            n_plan = 1
+            plans = random.sample(plans, min(len(plans), n_plan))
+            print(f"====Selection parameter: {n_plan} plans")
             for plan in plans:
                 print(f"\n=={plan}' 플랜을 찾았습니다.")
- 
-                # 해당 플랜의 데이터 필터링
-                ii_df_plans = i_df_plans[i_df_plans['PlanName'] == plan]
-           
-                # examples 생성 부분
-                example_list = extract_examples_from_plan(ii_df_plans, cols_examples)
-                examples = [f"- {example}" for example in example_list]
-                examples = "# Examples\n" + "\n".join(examples)
-  
-                print(f"Examples:\n{examples}")
+                index_plan = int(map_plan[map_plan['PlanName_English'] == plan]['id_plan'].values[0])
 
-                # 심리 상담사 프롬프트 생성
-                prompt = create_counselor_family_prompt(family_data, plan, examples)
-                prompt_dialouge_path = os.path.join(prompt_path, f"2_prompt_dialogue_{i}_cat_{category_id}_{model_name}_{timestamp}.txt")
+                index_plan_dialogue = f"{index_persona}_Step_2_dialogue_Cat_{category_index}_Plan_{index_plan}_{name_param}"
+                index_plan_scoring = f"{index_persona}_Step_3_scoring_Cat_{category_index}_Plan_{index_plan}_{name_param}"
+                # 해당 플랜의 데이터 필터링
+                i_df_plans = df_plans[df_plans['PlanName_English'] == plan]
+           
+                # 심리 상담사 프롬프트 생성 (category_id는 이미 문자열로 변환됨)
+                prompt, examples = create_counselor_family_prompt(i_persona, category_id, i_df_plans)
+                prompt_dialouge_path = os.path.join(prompt_path, f"{index_plan_dialogue}_prompt.txt")
                 save_llm_prompts_to_txt(prompt, prompt_dialouge_path)
                 
                 print(f"Prompting: {prompt}\n")
@@ -344,7 +383,7 @@ def main(cfg: AppConfig) -> None:
                     
                     os.makedirs(output_dir, exist_ok=True)
                     
-                    output_file = os.path.join(output_dir, f"2_survey_{i}_plan_{plan}_{model_name}_{timestamp}.json")
+                    output_file = os.path.join(output_dir, f"{index_plan_dialogue}.json")
                     save_dialogue_to_file(output_file, dialogue_data, category_id, plan, examples)
                     # output_file = os.path.join(output_dir, f"survey_{i}_cat_{category_id}_plan_{plan_name}_Prompt_{plan.get('id')}_{model_name}_{timestamp}.json")
                     # save_dialogue_to_file(output_file, prompt, category_id, plan.get('id', ''), examples)
@@ -355,7 +394,7 @@ def main(cfg: AppConfig) -> None:
                     continue # 대화 생성 실패 시 다음 plan으로 넘어감 (스코어링 건너뛰기)
 
                 # --- 스코어링 로직 시작 --- (for plan 루프 안으로 이동)
-                from prompt import get_scoring_prompt
+                
                 scoring_items_dict = load_data_from_cfg(cfg, 'scoring_items', dict, {})
                 scoring_criteria_list = []
                 if scoring_items_dict:
@@ -384,7 +423,7 @@ def main(cfg: AppConfig) -> None:
                         
                         prompt_scoring_path = os.path.join(
                             prompt_path, 
-                            f"3_prompt_scoring_{i}_cat_{category_id}_plan_{plan}_{model_name}_{timestamp}.txt" # plan 변수 사용
+                            f"{index_plan_scoring}_prompt.txt" # plan 변수 사용
                         )
                         save_llm_prompts_to_txt(prompt, prompt_scoring_path)
                         print(f"스코어링 프롬프트 생성됨: {prompt_scoring_path}")
@@ -394,9 +433,20 @@ def main(cfg: AppConfig) -> None:
                         if scoring_data:
                             output_file = os.path.join(
                                 output_dir, 
-                                f"3_scoring_{i}_plan_{plan}_{model_name}_{timestamp}.json" # plan 변수 사용
+                                f"{index_plan_scoring}_scoring.json" # plan 변수 사용
                             )
                             save_response_to_file(output_file, scoring_data, i)
+                            dict_score = scoring_data.get('scoring')
+                            dict_explanation = scoring_data.get('explanation')
+                            dict_score = {scoring_index_to_id[int(key)]: value for key, value in dict_score.items()}
+                            dict_explanation = {'explanation_'+scoring_index_to_id[int(key)]: value for key, value in dict_explanation.items()}
+                            merged_dict = {**df_survey.iloc[i,:].to_dict(), **dict_score, **dict_explanation}
+
+                
+                            df_scores = pd.concat([df_scores, pd.DataFrame([merged_dict])], ignore_index=True)
+
+            
+                            family
                             print(f"스코어링 결과 저장됨: {output_file}")
                         else:
                             print("스코어링 데이터 파싱 실패")
@@ -408,12 +458,15 @@ def main(cfg: AppConfig) -> None:
                 #     print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
                 # --- 스코어링 로직 끝 ---
                 print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
+                df_scores.to_csv(os.path.join(output_family_path, f"{index_persona}_scores.csv"), encoding='utf-8-sig', index=True)
+
         
         except Exception as e:
             print(f"카테고리 '{category_id}' 처리 중 오류 발생: {e}")
             import traceback
             traceback.print_exc()
-
+        df_scores.to_csv(os.path.join(output_family_path, f"scores.csv"), encoding='utf-8-sig', index=True)
+    
 if __name__ == "__main__":
     main()
 # - 이와 같은 코칭이 도움이 되었던 사례들을 천천히 떠올려 보고, 개선 되기 전의 가족 대화를 생성해 주세요.

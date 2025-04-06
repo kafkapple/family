@@ -8,16 +8,16 @@ model_name: gemma3 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/
 temperature: 0.7
 max_tokens: 2000
 example_count: 10  # 선택할 예시 문장 수
-categories:
-  - developmental_age_focused
-  - seasonal_life_events
-  - parent_caregiver_dialogue
-  - emotion_needs_understanding
-  - discipline_boundary_setting
-  - self_help_independence
-  - play_interaction
-  - media_related
-  - relationship_communication
+# categories:
+#   - developmental_age_focused
+#   - seasonal_life_events
+#   - parent_caregiver_dialogue
+#   - emotion_needs_understanding
+#   - discipline_boundary_setting
+#   - self_help_independence
+#   - play_interaction
+#   - media_related
+#   - relationship_communication
 
 model:
   type: ${llm_provider}
@@ -34,6 +34,8 @@ model:
     stop: null
 
 
+prompt:
+  top_k: 3
 # Evaluation settings: Scoring and Problem Types
 
 # Scoring criteria definitions (from scoring.yaml)
@@ -103,16 +105,16 @@ output_formats:
     template: |
       {
         "scoring": {
-          "emotional_relationship": 0,
-          "active_listening": 0,
-          "communication_clarity": 0,
-          "conflict_resolution": 0
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0
         },
         "explanation": {
-          "emotional_relationship": "점수 설명",
-          "active_listening": "점수 설명",
-          "communication_clarity": "점수 설명",
-          "conflict_resolution": "점수 설명"
+          "0": "Index 0 점수 이유",
+          "1": "Index 1 점수 이유",
+          "2": "Index 2 점수 이유",
+          "3": "Index 3 점수 이유"
         }
       }
 
@@ -121,9 +123,9 @@ output_formats:
       {
         "selected_categories": [
           {
-            "category_name": "카테고리명",
-            "priority": "1-3 우선순위",
-            "selection_reason": "선정 이유"
+            "category_name": 카테고리명,
+            "priority": 1-3 우선순위,
+            "selection_reason": 선정 이유
           }
         ]
       }
@@ -132,16 +134,16 @@ output_formats:
     template: |
       {
         "conversation_analysis": {
-          "overall_analysis": "전반적 분석",
-          "strengths": "강점",
-          "improvement_points": "개선점"
+          "overall_analysis": 전반적 분석,
+          "strengths": 강점,
+          "improvement_points": 개선점
         },
         "recommended_plans": [
           {
-            "category": "카테고리",
-            "plan_name": "플랜명",
-            "reason": "추천 이유",
-            "expected_effect": "기대 효과"
+            "category": 카테고리,
+            "plan_name": 플랜명,
+            "reason": 추천 이유,
+            "expected_effect": 기대 효과
           }
         ]
       } 
