@@ -53,8 +53,8 @@ def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
 - 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
 - 단순히 첫 번째 관심사에만 집중하지 말고, 2, 3번째 관심사, 키워드, 맥락, 카테고리 설명을 함께 파악하세요.
 - 가장 관련성이 높은 카테고리 하나를 선택하고, 그 카테고리의 **인덱스(정수)** 를 응답 JSON에 포함시키세요.
-- 카테고리 리스트([Category List])에 제공된 인덱스 중에서만 선택해야 합니다.
-- 반드시 한국어로 작성하세요.
+- 카테고리 리스트([Available Categories])에 제공된 인덱스 중에서만 선택해야 합니다.
+- **`explanation` 필드는 반드시 한국어로만 작성해야 합니다. 영어 단어나 문장을 사용하지 마세요.**
 
 # Context
 ### Family Persona
@@ -62,7 +62,7 @@ def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
 ### Priority Interests
 - 관심사 카테고리 및 키워드는 우선 순위가 높은 것부터 나열되어 있습니다.
 {processed}
-## Available Categories
+
 {category_info} 
 
 # Output Format

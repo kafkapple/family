@@ -150,14 +150,19 @@ def format_dialogue_for_scoring(dialogue_data: Dict[str, Any]) -> str:
                 dialogue = dialogue_data.get('dialgues') 
                 if dialogue is not None:
                     print("주의: 'dialogue' 키 대신 복수형 오타 'dialgues' 키를 사용했습니다.")
+                else:
+                    # 네 번째로 'diallogue' (double l) 오타 시도
+                    dialogue = dialogue_data.get('diallogue')
+                    if dialogue is not None:
+                        print("주의: 'dialogue' 키 대신 'diallogue'(double l) 오타 키를 사용했습니다.")
 
         if not dialogue:
-            print("dialogue/dialouge/dialgues 필드가 없거나 비어있습니다")
+            print("dialogue/dialouge/dialgues/diallogue 필드가 없거나 비어있습니다")
             print(f"사용 가능한 키: {dialogue_data.keys()}")
             return "[대화 데이터 비어있음]"
             
         if not isinstance(dialogue, list):
-            print(f"dialogue/dialouge/dialgues 필드 타입 오류: {type(dialogue)}")
+            print(f"dialogue/dialouge/dialgues/diallogue 필드 타입 오류: {type(dialogue)}")
             return "[대화 턴 데이터 형식 오류]"
             
         formatted_turns = []
@@ -213,27 +218,40 @@ def save_dialogue_to_file(output_path: str, dialogue_data: Dict[str, Any], categ
         # JSON 데이터 저장
         json.dump(dialogue_data, f, ensure_ascii=False, indent=2)
 
-def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 3) -> Optional[Dict[str, Any]]:
-    """LLM을 호출하고 응답을 JSON으로 파싱합니다. 실패 시 재시도합니다."""
+def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 7, expected_keys: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    """LLM을 호출하고 응답을 JSON으로 파싱합니다. 실패 시 재시도하고, 성공 시 키를 검증/수정합니다."""
     retries = 0
     while retries < max_retries:
         response = get_llm_response(prompt, llm_client)
         if not response:
             print(f"LLM 응답 없음. 재시도 ({retries + 1}/{max_retries})...")
             retries += 1
-            time.sleep(1) # 간단한 지연 추가
+            time.sleep(1) 
             continue
 
         parsed_data = parse_json_response(response)
         if parsed_data:
-            return parsed_data
-        else:
-            print(f"JSON 파싱 실패. 재시도 ({retries + 1}/{max_retries})...")
-            print(f"실패한 응답: {response[:500]}...") # 실패한 응답 일부 로깅
-            retries += 1
-            time.sleep(1) # 간단한 지연 추가
+            # JSON 파싱 성공 후 키 검증 및 수정
+            if expected_keys:
+                try:
+                    corrected_data = fix_json_keys(parsed_data, expected_keys)
+                    return corrected_data
+                except Exception as e_fix:
+                    print(f"JSON 키 수정 중 오류 발생: {e_fix}")
+                    print(f"원본 파싱 데이터: {parsed_data}")
+                    # 키 수정 실패 시 파싱 실패로 간주하고 재시도 또는 최종 실패
+                    # return parsed_data # 또는 수정 전 데이터 반환 선택
+            else:
+                 # expected_keys가 없으면 검증/수정 없이 반환
+                 return parsed_data
+        # else 블록은 파싱 실패 시 재시도 로직으로 이어짐
+        print(f"JSON 파싱/키 수정 실패. 재시도 ({retries + 1}/{max_retries})...")
+        if not parsed_data: # 파싱 자체가 실패한 경우만 로그 출력 (키 수정 실패는 위에서 로깅)
+             print(f"실패한 응답: {response[:500]}...") 
+        retries += 1
+        time.sleep(1)
             
-    print(f"최대 재시도 횟수({max_retries}) 도달. JSON 파싱 최종 실패.")
+    print(f"최대 재시도 횟수({max_retries}) 도달. JSON 처리 최종 실패.")
     return None
 
 # --- 매핑 함수 정의 --- 
@@ -252,6 +270,66 @@ def create_scoring_mappings(scoring_criteria_list: List[Dict]) -> Tuple[Dict[int
     print(f"스코어링 기준 매핑 생성 완료: {len(scoring_criteria_list)}개 ({scoring_index_to_id})")
     return scoring_index_to_id, scoring_id_to_index
 # --- 매핑 함수 정의 끝 --- 
+
+# --- JSON 키 검증/수정 함수 --- 
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """두 문자열 간의 Levenshtein 거리를 계산합니다."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+def fix_json_keys(data: Dict[str, Any], expected_keys: List[str], threshold: int = 2) -> Dict[str, Any]:
+    """Levenshtein 거리를 사용하여 JSON 데이터의 최상위 키를 예상 키로 수정합니다. (재귀 제거)"""
+    if not isinstance(data, dict):
+        return data 
+
+    corrected_data = {}
+    used_expected_keys = set()
+    actual_keys = list(data.keys()) # 순회 중 변경 방지를 위해 키 목록 복사
+
+    for actual_key in actual_keys:
+        value = data[actual_key]
+        best_match = None
+        min_distance = float('inf')
+
+        # 현재 키와 가장 유사한 예상 키 찾기
+        for expected_key in expected_keys:
+            distance = levenshtein_distance(actual_key, expected_key)
+            if distance < min_distance:
+                min_distance = distance
+                best_match = expected_key
+        
+        # 거리가 임계값 이하이고 아직 사용되지 않은 예상 키면 수정된 키 사용, 아니면 원본 키 사용
+        if best_match and min_distance <= threshold and best_match not in used_expected_keys:
+            if actual_key != best_match:
+                print(f"JSON 키 수정: '{actual_key}' -> '{best_match}' (거리: {min_distance})")
+            corrected_data[best_match] = value # 재귀 호출 없이 값 그대로 할당
+            used_expected_keys.add(best_match)
+        else:
+            # 수정 조건 미달 시 원본 키와 값 사용
+            if min_distance > threshold and best_match:
+                 print(f"경고: JSON 키 '{actual_key}'는 예상 키와 거리가 멀어 수정하지 않음 (최소 거리: {min_distance} to '{best_match}')")
+            corrected_data[actual_key] = value # 재귀 호출 없이 값 그대로 할당
+            # 만약 이 키가 예상 키 목록에 있었다면 사용된 것으로 간주 (중복 매칭 방지 위함)
+            if actual_key in expected_keys:
+                 used_expected_keys.add(actual_key)
+
+    return corrected_data
+# --- JSON 키 검증/수정 함수 끝 --- 
 
 @hydra.main(config_path="conf", config_name="config_with_categories")
 def main(cfg: AppConfig) -> None:
@@ -319,9 +397,9 @@ def main(cfg: AppConfig) -> None:
         save_llm_prompts_to_txt(prompt_family, prompt_category_path)
         i_persona = i_family.get("persona")
 
-    # LLM을 사용하여 카테고리 인덱스 생성
-        family_data = call_llm_and_parse_json(prompt_family, llm_client)
-
+    # LLM을 사용하여 카테고리 인덱스 생성 + 키 검증
+        expected_category_keys = ["category_index", "explanation"]
+        family_data = call_llm_and_parse_json(prompt_family, llm_client, expected_keys=expected_category_keys)
         
         # JSON 응답 파싱 및 유효성 검사
         if family_data is None:
@@ -371,8 +449,9 @@ def main(cfg: AppConfig) -> None:
                 
                 print(f"Prompting: {prompt}\n")
                 
-                # LLM을 사용하여 대화 생성
-                dialogue_data = call_llm_and_parse_json(prompt, llm_client)
+                # LLM을 사용하여 대화 생성 + 키 검증
+                expected_dialogue_keys = ["category", "plan", "explanation", "dialogue"]
+                dialogue_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_dialogue_keys)
                 
                 if dialogue_data:
                     print(f"생성된 대화 데이터:")
@@ -428,12 +507,18 @@ def main(cfg: AppConfig) -> None:
                         save_llm_prompts_to_txt(prompt, prompt_scoring_path)
                         print(f"스코어링 프롬프트 생성됨: {prompt_scoring_path}")
                         
-                        # LLM 응답 받기
-                        scoring_data = call_llm_and_parse_json(prompt, llm_client)
+                        # LLM 응답 받기 + 최상위 키 검증 (scoring, explanation)
+                        expected_scoring_keys = ["scoring", "explanation"]
+                        scoring_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_scoring_keys)
+
                         if scoring_data:
+                            # 스코어링 내부 키는 인덱스 문자열이므로 별도 처리 필요
+                            # fix_json_keys는 현재 숫자 문자열 키 수정에 적합하지 않을 수 있음
+                            # 우선은 LLM이 정확한 인덱스 키를 반환한다고 가정하거나,
+                            # 필요시 아래 scoring_data 처리 부분에서 직접 검증/수정 로직 추가
                             output_file = os.path.join(
-                                output_dir, 
-                                f"{index_plan_scoring}_scoring.json" # plan 변수 사용
+                                output_dir,
+                                f"{index_plan_scoring}_scoring.json"
                             )
                             save_response_to_file(output_file, scoring_data, i)
                             dict_score = scoring_data.get('scoring')
@@ -441,12 +526,15 @@ def main(cfg: AppConfig) -> None:
                             dict_score = {scoring_index_to_id[int(key)]: value for key, value in dict_score.items()}
                             dict_explanation = {'explanation_'+scoring_index_to_id[int(key)]: value for key, value in dict_explanation.items()}
                             merged_dict = {**df_survey.iloc[i,:].to_dict(), **dict_score, **dict_explanation}
-
-                
-                            df_scores = pd.concat([df_scores, pd.DataFrame([merged_dict])], ignore_index=True)
-
+                            df_i = pd.DataFrame([merged_dict])
+                            df_i['persona_index'] = i
+                            df_i['category_index'] = category_index
+                            df_i['category_name'] = category_id
+                            df_i['plan_index'] = index_plan
+                            df_i['plan_name'] = plan
+                            
+                            df_scores = pd.concat([df_i, df_scores], ignore_index=True)
             
-                            family
                             print(f"스코어링 결과 저장됨: {output_file}")
                         else:
                             print("스코어링 데이터 파싱 실패")
@@ -458,14 +546,13 @@ def main(cfg: AppConfig) -> None:
                 #     print("대화 데이터가 비어있거나 'dialogue' 필드가 없음")
                 # --- 스코어링 로직 끝 ---
                 print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
-                df_scores.to_csv(os.path.join(output_family_path, f"{index_persona}_scores.csv"), encoding='utf-8-sig', index=True)
 
         
         except Exception as e:
             print(f"카테고리 '{category_id}' 처리 중 오류 발생: {e}")
             import traceback
             traceback.print_exc()
-        df_scores.to_csv(os.path.join(output_family_path, f"scores.csv"), encoding='utf-8-sig', index=True)
+    df_scores.to_csv(os.path.join(output_family_path, f"scores.csv"), encoding='utf-8-sig', index=True)
     
 if __name__ == "__main__":
     main()
