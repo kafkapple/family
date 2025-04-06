@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import json
 
 
 role = """
@@ -22,9 +23,10 @@ def gen_plan_info(df_plan):
     
     for _, row in df_unique_categories.iterrows():
         keyword = row['keyword']
-        prompt_lines.append(f"{row['id_plan']}. {row['PlanName']}")
-        prompt_lines.append(f"   Description: {row['Course_description']}")
-        prompt_lines.append(f"   Keywords: {keyword}")
+        prompt_lines.append(f"  ID: {row['id_plan']}")
+        prompt_lines.append(f"   Plan Name: {row['PlanName']}")
+        # prompt_lines.append(f"   Description: {row['Course_description']}")
+        # prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
 
     return "\n".join(prompt_lines)
@@ -50,8 +52,8 @@ def generate_llm_prompts(df_category):
         description = row['concatenated_descriptions']
         keyword = row['keyword']
         
-        prompt_lines.append(f"{category_id_val}. {eng_name}")
-        prompt_lines.append(f"   Korean Name: {korean_name}")
+        prompt_lines.append(f"   ID: {category_id_val}")
+        prompt_lines.append(f"   Category Name: {eng_name} / {korean_name}")
         prompt_lines.append(f"   Description: {description}")
         prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
@@ -199,8 +201,6 @@ def create_counselor_family_prompt(i_persona, category_name: str, ii_df_plans) -
     return prompt, examples
 
 from typing import List, Dict, Any
-# Remove json import if no longer needed
-# import json
 
 def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_template_str: str) -> str:
     """스코어링을 위한 프롬프트를 생성합니다. (인덱스 키 사용)"""
@@ -320,17 +320,22 @@ def get_category_prompt(prompt_category: str,
     )
 
 def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
-    """Generate prompt for specific coaching plan recommendation"""
-    prompt = f"""
+    """Generate prompt for specific coaching plan recommendation (f-string 제거 및 포맷팅 개선)"""
+    # 딕셔너리를 읽기 좋은 JSON 문자열로 포맷팅
+    scoring_str = json.dumps(scoring_results, ensure_ascii=False, indent=2)
+    categories_str = json.dumps(categories, ensure_ascii=False, indent=2)
+    
+    # 표준 문자열 사용 (f-string 아님)
+    prompt_template = """
 {role}
 - 아래 정보들을 종합적으로 고려하여, 아이에게 가장 적합한 구체적인 코칭 플랜들을 추천하고 그 이유와 기대 효과를 설명해주세요.
 
 # Context
 ## Conversation Scoring
-{scoring_results}
+{scoring_results_str}
 
 ## Selected Categories
-{categories}
+{categories_str}
 
 ## Relevant Plans Information
 {relevant_plans_info}
@@ -340,27 +345,36 @@ def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
 ```json
 {{
   "conversation_analysis": {{
-    "overall_analysis": "전반적 분석",
-    "strengths": "강점",
-    "improvement_points": "개선점"
+    "overall_analysis": "string", # 전반적 분석
+    "strengths": "string", # 강점
+    "improvement_points": "string" # 개선점
   }},
   "recommended_plans": [
     {{
-      "category": "카테고리",
-      "plan_name": "플랜명",
-      "reason": "추천 이유",
-      "expected_effect": "기대 효과"
+      "category": "string", # 관련 카테고리 이름
+      "plan_id": "string", # 추천 플랜 ID
+      "plan_name": "string", # 추천 플랜명
+      "reason": "string", # 추천 이유 (대화/평가 근거)
+      "expected_effect": "string" # 기대 효과
     }}
+    // ... (추가 플랜 추천 가능)
   ]
 }}
 ```
-반드시 위의 JSON 형식을 정확히 준수하여 응답하세요. 특히 `recommended_plans` 배열 내 각 객체의 키(`plan_id`, `plan_name`, `category_id`, `recommend_reason`, `expected_effect`)를 정확히 사용해야 합니다.
+- 반드시 위의 JSON 형식을 정확히 준수하여 응답하세요.
+- 모든 키와 문자열 값은 큰따옴표("")로 감싸야 합니다.
+- JSON 객체 외에 다른 텍스트를 포함하지 마세요.
 
 [추천 가이드라인]
-- 위 '[참고 플랜 설명]'에 제시된 플랜들을 우선적으로 고려하되, 필요시 연령 및 대화 맥락에 더 적합한 다른 플랜을 추천할 수도 있습니다.
-- 추천 이유(`recommend_reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
+- 위 '[Relevant Plans Information]'에 제시된 플랜들을 우선적으로 고려하되, 필요시 연령 및 대화 맥락에 더 적합한 다른 플랜을 추천할 수도 있습니다.
+- 추천 이유(`reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
 - 기대 효과(`expected_effect`)는 해당 플랜을 통해 아이의 어떤 점이 개선될 수 있는지 명확하게 기술해야 합니다.
 """
-    # Return the fully formatted string (using f-string for simplicity here)
-    prompt.format(role=role)
+    # .format() 메소드를 사용하여 모든 플레이스홀더 채우기
+    prompt = prompt_template.format(
+        role=role,
+        scoring_results_str=scoring_str,
+        categories_str=categories_str,
+        relevant_plans_info=relevant_plans_info
+    )
     return prompt

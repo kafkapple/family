@@ -489,16 +489,10 @@ def main(cfg: AppConfig) -> None:
                     print(f"생성된 대화 데이터:")
                     print(json.dumps(dialogue_data, ensure_ascii=False, indent=2))
                     
-                    # 생성된 대화를 파일에 저장
-                    #output_dir = os.path.join(output_family_path, category_id)
-                    
-                    #os.makedirs(output_dir, exist_ok=True)
                     
                     output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}.json")
                     save_dialogue_to_file(output_file, dialogue_data, category_name, plan, examples)
-                    # output_file = os.path.join(output_dir, f"survey_{i}_cat_{category_id}_plan_{plan_name}_Prompt_{plan.get('id')}_{model_name}_{timestamp}.json")
-                    # save_dialogue_to_file(output_file, prompt, category_id, plan.get('id', ''), examples)
-                    
+             
                     print(f"\n대화가 '{output_file}'에 저장되었습니다.")
                 else:
                     print("대화 생성에 실패했습니다.")
@@ -586,7 +580,16 @@ def main(cfg: AppConfig) -> None:
                 )
             prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_Category_{name_param}_prompt.txt")
             save_llm_prompts_to_txt(prompt, prompt_category_path)
-            category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['id', 'name', 'priority', 'reason'])
+            # Step 4의 예상 최상위 키 수정
+            expected_category_keys = ["selected_categories"] 
+            category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_category_keys)
+            
+            # category_data가 None이거나 필요한 키가 없는 경우 처리
+            if not category_data or "selected_categories" not in category_data or not isinstance(category_data["selected_categories"], list):
+                 print(f"Family {i}: Step 4 카테고리 추천 데이터 처리 실패. 다음 가족으로 넘어갑니다.")
+                 print(f"LLM 응답 (category_data): {category_data}")
+                 continue
+
             output_file = os.path.join(
                                 output_category_path,
                                 f"{index_persona}_Step_4_Category_{name_param}.json"
@@ -595,7 +598,28 @@ def main(cfg: AppConfig) -> None:
             print(f"카테고리 결과 저장됨: {output_file}")
 
             ####### 플랜 추천 로직 시작 #######
-            category_ids = [int(i.get("id")) for i in category_data.get("selected_categories")]
+            # category_ids 생성 시 오류 처리 강화
+            category_ids = []
+            for item in category_data.get("selected_categories", []):
+                cat_id_str = item.get("id")
+                if cat_id_str is not None and isinstance(cat_id_str, (str, int)):
+                    try:
+                        cat_id_int = int(cat_id_str) # 정수 변환 시도
+                        # 변환된 ID가 유효한 카테고리 ID인지 추가 확인 (선택 사항)
+                        if cat_id_int in category_id_to_name:
+                             category_ids.append(cat_id_int)
+                        else:
+                             print(f"경고: 추천된 카테고리 ID '{cat_id_int}'가 유효하지 않아 무시합니다.")
+                    except ValueError:
+                        print(f"경고: 추천된 카테고리 ID '{cat_id_str}'를 정수로 변환할 수 없어 무시합니다.")
+                else:
+                     print(f"경고: 유효하지 않은 카테고리 ID 항목 발견: {item}")
+            
+            if not category_ids:
+                print(f"Family {i}: 유효한 추천 카테고리 ID를 찾을 수 없습니다. 플랜 추천을 건너뛰니다.")
+                continue
+
+            print(f"추천된 유효 카테고리 ID 목록: {category_ids}")
             plans_info = df_plan[df_plan['id_category'].isin(category_ids)]
             relevant_plans_info = gen_plan_info(plans_info)
             prompt_plan_path = os.path.join(prompt_path, f"{index_persona}_Step_5_Plan_{name_param}_prompt.txt")
@@ -603,7 +627,7 @@ def main(cfg: AppConfig) -> None:
             save_llm_prompts_to_txt(prompt, prompt_plan_path)
             plan_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['conversation_analysis', 'recommended_plans'])
             output_file = os.path.join(
-                                output_category_path,
+                                output_final_path,
                                 f"{index_persona}_Step_5_Plan_{name_param}.json"
                             )
             save_response_to_file(output_file, plan_data, i)
