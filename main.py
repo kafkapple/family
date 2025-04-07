@@ -19,7 +19,7 @@ from src.llm_interface import get_llm_response
 from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
 from src.prep_map_category import level3_to_english
 from src.prep_map_survey import FamilyPersona
-from src.prompt import  create_survey_persona_prompt, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info
+from src.prompt import  generate_category_from_survey, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
 
@@ -129,7 +129,7 @@ def parse_json_response(response: str) -> Dict[str, Any]:
         return None
 
 def format_dialogue_for_scoring(dialogue_data: Dict[str, Any]) -> str:
-    """대화 데이터를 스코어링용 포맷으로 변환합니다. (키 오타 처리 추가)"""
+    """대화 데이터를 스코어링용 포맷으로 변환합니다. (키 오타 및 간단한 정제 처리, 상세 로깅 추가)"""
     try:
         if not dialogue_data:
             print("대화 데이터가 비어있습니다")
@@ -139,42 +139,62 @@ def format_dialogue_for_scoring(dialogue_data: Dict[str, Any]) -> str:
             print(f"대화 데이터 타입 오류: {type(dialogue_data)}")
             return "[대화 데이터 형식 오류]"
             
-        # 'dialogue' 키를 먼저 시도하고, 없으면 오타인 'dialouge' 시도
-        dialogue = dialogue_data.get('dialogue')
-        if dialogue is None:
-            dialogue = dialogue_data.get('dialouge') # 오타 키 시도
+        # 다양한 키 변형 시도 ('dialogue', 'dialouge', 'dialgues', 'diallogue')
+        dialogue = None
+        possible_dialogue_keys = ['dialogue', 'dialouge', 'dialgues', 'diallogue']
+        for key in possible_dialogue_keys:
+            dialogue = dialogue_data.get(key)
             if dialogue is not None:
-                print("주의: 'dialogue' 키 대신 'dialouge' 키를 사용했습니다.")
-            else:
-                # 세 번째로 복수형 오타 'dialgues' 시도
-                dialogue = dialogue_data.get('dialgues') 
-                if dialogue is not None:
-                    print("주의: 'dialogue' 키 대신 복수형 오타 'dialgues' 키를 사용했습니다.")
-                else:
-                    # 네 번째로 'diallogue' (double l) 오타 시도
-                    dialogue = dialogue_data.get('diallogue')
-                    if dialogue is not None:
-                        print("주의: 'dialogue' 키 대신 'diallogue'(double l) 오타 키를 사용했습니다.")
+                if key != 'dialogue':
+                    print(f"주의: 'dialogue' 키 대신 '{key}' 키를 사용했습니다.")
+                break
 
         if not dialogue:
-            print("dialogue/dialouge/dialgues/diallogue 필드가 없거나 비어있습니다")
-            print(f"사용 가능한 키: {dialogue_data.keys()}")
+            print(f"dialogue 필드를 찾을 수 없거나 비어있습니다. 사용 가능한 키: {list(dialogue_data.keys())}")
             return "[대화 데이터 비어있음]"
             
         if not isinstance(dialogue, list):
-            print(f"dialogue/dialouge/dialgues/diallogue 필드 타입 오류: {type(dialogue)}")
+            print(f"dialogue 필드 타입 오류: {type(dialogue)}")
             return "[대화 턴 데이터 형식 오류]"
             
         formatted_turns = []
         for i, turn in enumerate(dialogue):
             try:
                 if isinstance(turn, dict):
-                    speaker = turn.get('speaker', '')
-                    content = turn.get('content', '')
-                    if speaker and content:
-                        formatted_turns.append(f"{speaker}: {content}")
+                    # Speaker 키 처리 (다양한 변형 시도)
+                    speaker = None
+                    possible_speaker_keys = ['speaker', 'Speaker', 'singer'] 
+                    for key in possible_speaker_keys:
+                        speaker = turn.get(key)
+                        if speaker:
+                            break
+                    
+                    # Content 키 처리 (다양한 변형 시도)
+                    content = None
+                    possible_content_keys = ['content', 'comment']
+                    for key in possible_content_keys:
+                        content = turn.get(key)
+                        if content:
+                            break
+
+                    # 유효성 검사 및 로깅 강화
+                    speaker_valid = speaker and isinstance(speaker, str) and speaker.strip()
+                    content_valid = content and isinstance(content, str) and content.strip()
+
+                    if speaker_valid and content_valid:
+                        # 간단한 HTML 태그 제거 (<a>, <b> 등) 및 앞뒤 공백 제거
+                        cleaned_content = re.sub(r'<[^>]+>', '', content).strip()
+                        # 깨진 문자나 제어 문자 등 추가 정제 필요시 여기에 추가 가능
+                        formatted_turns.append(f"{speaker.strip()}: {cleaned_content}")
                     else:
-                        print(f"턴 {i} 데이터 누락: {turn}")
+                        # 실패 원인 구체적 로깅
+                        reason = []
+                        if not speaker_valid:
+                            reason.append(f"speaker 누락/비거나 문자열 아님 (값: '{speaker}', 타입: {type(speaker)})")
+                        if not content_valid:
+                            reason.append(f"content 누락/비거나 문자열 아님 (값: '{content}', 타입: {type(content)})")
+                        print(f"턴 {i} 처리 실패: { ' / '.join(reason) }")
+                        print(f"   원본 턴 데이터: {turn}")
                 else:
                     print(f"턴 {i} 타입 오류: {type(turn)}")
             except Exception as e:
@@ -382,6 +402,7 @@ def main(cfg: AppConfig) -> None:
     # --- 매핑 생성 완료 ---
 
     prompt_category_info = generate_llm_prompts(df) # 함수명 변경 고려 (이제 프롬프트 전체가 아님)
+    category_info_only = generate_category_info_only(df)
     output_path = cwd / Path("outputs") / Path(model_name) 
     
     output_persona_path = cwd / Path("outputs") / Path(model_name) / Path("1_persona")
@@ -405,9 +426,6 @@ def main(cfg: AppConfig) -> None:
     else:
         print("LLM 클라이언트 초기화 완료.")
 
-    # plans_category = data.get("plans", {})  # plans
-    
-    
     csv_path = cwd / "data" / "VirtualSurvey.csv"
     family = FamilyPersona(csv_path=csv_path)
     df_scores = pd.DataFrame()
@@ -418,14 +436,14 @@ def main(cfg: AppConfig) -> None:
 
         i_family = family.get_persona_data(i)
 
-        prompt_family = create_survey_persona_prompt(i_family, prompt_category_info)
+        prompt_family = generate_category_from_survey(i_family, prompt_category_info)
         
         prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_1_{name_param}_prompt.txt")
         save_llm_prompts_to_txt(prompt_family, prompt_category_path)
         i_persona = i_family.get("persona")
 
         # LLM을 사용하여 카테고리 ID 생성 + 키 검증
-        expected_category_keys = ["category_id", "explanation"] # 키 이름 변경: category_index -> category_id
+        expected_category_keys = ["category_id", "explanation", "persona"] # 키 이름 변경: category_index -> category_id, "child", "parent", "age", "gender", "personality"
         family_data = call_llm_and_parse_json(prompt_family, llm_client, expected_keys=expected_category_keys)
         
         if family_data is None:
@@ -433,7 +451,30 @@ def main(cfg: AppConfig) -> None:
             continue 
         
         selected_category_id = family_data.get("category_id") # 키 이름 변경: category_index -> category_id
+        # family_persona = family_data.get("persona") # 수정 전
+        # child_persona = family_persona.get("child") # 수정 전
+        # parent_persona = family_persona.get("parent") # 수정 전
+        # child_age = child_persona.get("age") # 수정 전
         
+        # 페르소나 정보 가져오기 (NoneType 오류 방지)
+        family_persona = family_data.get("persona")
+        if family_persona is None or not isinstance(family_persona, dict):
+            print(f"경고: Family {i}의 LLM 응답에서 유효한 'persona' 딕셔너리를 찾을 수 없습니다. 기본값을 사용합니다.")
+            print(f"   LLM 응답 (family_data): {family_data}")
+            child_persona = {} # 기본 빈 딕셔너리
+            parent_persona = {} # 기본 빈 딕셔너리
+        else:
+            # persona가 존재하면 child/parent 리스트 가져오기 시도
+            child_list = family_persona.get("child", [])
+            parent_list = family_persona.get("parent", [])
+            # 리스트가 비어있지 않으면 첫 번째 요소 사용, 아니면 빈 딕셔너리
+            child_persona = child_list[0] if isinstance(child_list, list) and child_list else {}
+            parent_persona = parent_list[0] if isinstance(parent_list, list) and parent_list else {}
+
+        # 자녀 나이 가져오기 (이제 child_persona는 항상 딕셔너리)
+        child_age = child_persona.get("age")
+        
+        print(f"Child age: {child_age if child_age is not None else '정보 없음'}")
         # 카테고리 ID 유효성 검사 (매핑에 존재하는지 확인)
         if selected_category_id is None or not isinstance(selected_category_id, int) or selected_category_id not in category_id_to_name:
             print(f"Family {i}: LLM이 유효하지 않은 카테고리 ID 반환 '{selected_category_id}' (타입: {type(selected_category_id)}). 다음 가족으로 넘어갑니다.")
@@ -474,7 +515,7 @@ def main(cfg: AppConfig) -> None:
                 i_df_plans = df_plans[df_plans['PlanName_English'] == plan]
            
                 # 심리 상담사 프롬프트 생성 (category_id는 이미 문자열로 변환됨)
-                prompt, examples = create_counselor_family_prompt(i_persona, category_name, i_df_plans)
+                prompt, examples = create_counselor_family_prompt(i_persona, category_name, i_df_plans, child_persona, parent_persona)
                 prompt_dialouge_path = os.path.join(prompt_path, f"{index_plan_dialogue}_prompt.txt")
                 save_llm_prompts_to_txt(prompt, prompt_dialouge_path)
                 
@@ -557,6 +598,7 @@ def main(cfg: AppConfig) -> None:
                             df_i['category_name'] = category_name
                             df_i['plan_index'] = index_plan
                             df_i['plan_name'] = plan
+                            df_i['child_age'] = child_age
                             
                             df_scores = pd.concat([df_scores, df_i], ignore_index=True)
             
@@ -572,8 +614,8 @@ def main(cfg: AppConfig) -> None:
                 # --- 스코어링 로직 끝 ---
                 print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
           
-            prompt = get_category_prompt(prompt_category=prompt_category_info,
-                    conversation_summary=dialogue_data,
+            prompt = get_category_prompt(prompt_category=category_info_only,
+                    dialogue=dialogue_data,
                     scoring_results=scoring_data, # Pass the original dictionary
     
                 )

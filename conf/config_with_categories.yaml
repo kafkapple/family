@@ -1,7 +1,7 @@
 # conf/config_with_categories.yaml
 yaml_path: ${hydra:runtime.cwd}/plans.yaml
 llm_provider: 'ollama'
-model_name: gemma3:12b #gemma3:12b #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
+model_name: gemma3:12b #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
 #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf:latest     0f5688cf9681    9.4 GB    4 weeks ago    
 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF:latest 
 

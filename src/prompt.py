@@ -54,14 +54,41 @@ def generate_llm_prompts(df_category):
         
         prompt_lines.append(f"   ID: {category_id_val}")
         prompt_lines.append(f"   Category Name: {eng_name} / {korean_name}")
-        prompt_lines.append(f"   Description: {description}")
+        # prompt_lines.append(f"   Description: {description}")
+        prompt_lines.append(f"   Keywords: {keyword}")
+        prompt_lines.append("")
+
+    return "\n".join(prompt_lines)
+def generate_category_info_only(df_category):
+    """
+    Generates LLM prompts listing categories with their IDs and descriptions.
+    (카테고리 목록을 ID, 이름, 설명과 함께 명확하게 생성하도록 개선)
+
+    Args:
+        df_category (pd.DataFrame): DataFrame containing category information.
+
+    Returns:
+        str: A formatted string listing categories for the LLM prompt.
+    """
+    df_unique_categories = df_category.drop_duplicates(subset=['CategoryName_English'])
+    prompt_lines = ["## Available Categories (ID, Name, Description)"]
+    
+    for _, row in df_unique_categories.iterrows():
+        category_id_val = row['id_category']
+        eng_name = row['CategoryName_English']
+        korean_name = row['CategoryName']
+        description = row['concatenated_descriptions']
+        keyword = row['keyword']
+        
+        prompt_lines.append(f"   ID: {category_id_val}")
+        prompt_lines.append(f"   Category Name: {eng_name} / {korean_name}")
         prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
 
     return "\n".join(prompt_lines)
 
 
-def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
+def generate_category_from_survey(context, category_info, top_k=3) -> str:
     persona = context.get('persona')
     priority_interests = context.get('priority_interests')
     priority_interests = priority_interests[:top_k]
@@ -73,7 +100,8 @@ def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
 {role}
 
 # Instruction
-- 가장 관련성이 높은 카테고리 하나를 선택하고, 그 카테고리의 **ID(정수)** 를 응답 JSON에 포함시키세요.
+- 주어진 Family persona, Priority Interests 정보를 바탕으로 가족 페르소나를 생성하고, 카테고리를 선택해야 합니다.
+- 가족 페르소나는 자녀와 양육자의 페르소나 정보를 각 1명 이상 포함해야 합니다.
 - 카테고리 목록([Available Categories])에 제공된 ID 중에서만 선택해야 합니다.
 - 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
 - **`explanation` 필드는 반드시 한국어로만 작성해야 합니다. 영어 단어나 문장을 사용하지 마세요.**
@@ -92,12 +120,33 @@ def create_survey_persona_prompt(context, category_info, top_k=3) -> str:
 - 반드시 다음 JSON 형식에 맞춰 결과를 출력해 주세요.
 - **`category_id` 필드에는 선택한 카테고리의 ID(정수)를 넣어야 합니다.**
 - **`explanation` 필드는 아래 예시와 같이 반드시 한국어로, 선택 이유를 상세히 기술해야 합니다.**
+- **`persona` 필드는 자녀와 양육자의 페르소나 정보를 포함해야 합니다.**
 - 모든 문자열 값은 큰따옴표("")로 감싸야 합니다.
 - JSON 객체 외에 다른 텍스트는 포함하지 마세요.
 ```json
 {{
   "category_id": int, // 예: 101 (카테고리 ID)
   "explanation": "string" // 예: "가족 페르소나의 OOO 측면과 우선순위 관심사 중 XX 키워드가 카테고리 ID 101(life_event_focused)의 설명 및 키워드와 가장 관련성이 높아 선택했습니다."
+  "persona": {{
+    "child": [{{
+        "name": "string", // 자녀 이름
+        "age": "string", // 자녀 나이
+        "role": "string", // 자녀 역할. 예: 첫째 아들, 둘째 딸, 셋째 아들 등
+        "gender": "string", // 자녀 성별
+        "personality": "string", // 자녀 성격
+        }},
+        // ...
+        ],
+    "parent": [{{
+        "name": "string", // 양육자 이름
+        "age": "string", // 양육자 나이
+        "role": "string", // 양육자 역할. 예: 엄마, 아빠,  양육자 등
+        "gender": "string", // 양육자 성별
+        "personality": "string", // 양육자 성격
+        }},
+        // ...
+        ]
+  }}
 }}
 ```
 """
@@ -125,15 +174,15 @@ def extract_examples_from_plan(df_plan_row, cols_examples):
                 examples.append(clean_example)
     return examples
 
-def create_counselor_family_prompt(i_persona, category_name: str, ii_df_plans) -> str:
+def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, child_persona, parent_persona) -> str:
     """심리 상담사 프롬프트를 생성합니다. (카테고리 이름을 직접 받도록 수정)"""
     global role
-    cols_examples = [col for col in ii_df_plans.columns if 'example_' in col]
+    cols_examples = [col for col in i_df_plans.columns if 'example_' in col]
     persona = i_persona
-    plan_name = ii_df_plans['PlanName'].iloc[0]
-    keyword = ii_df_plans['keyword'].iloc[0]
-    description = ii_df_plans['Course_description'].iloc[0]
-    example_list = extract_examples_from_plan(ii_df_plans, cols_examples)
+    plan_name = i_df_plans['PlanName'].iloc[0]
+    keyword = i_df_plans['keyword'].iloc[0]
+    description = i_df_plans['Course_description'].iloc[0]
+    example_list = extract_examples_from_plan(i_df_plans, cols_examples)
     examples = [f"- {example}" for example in example_list]
     examples = "\n".join(examples)
 
@@ -158,6 +207,12 @@ def create_counselor_family_prompt(i_persona, category_name: str, ii_df_plans) -
 
 ## 가족 페르소나 정보
 {persona}
+
+## 자녀 페르소나 정보
+{child_persona}
+
+## 양육자 페르소나 정보
+{parent_persona}
 
 ## 코칭 플랜
 - 카테고리: {category_name} 
@@ -195,7 +250,9 @@ def create_counselor_family_prompt(i_persona, category_name: str, ii_df_plans) -
         plan_name=plan_name, 
         keyword=keyword, 
         description=description,
-        examples=examples
+        examples=examples,
+        child_persona=child_persona,
+        parent_persona=parent_persona
     )
     return prompt, examples
 
@@ -217,7 +274,7 @@ def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_templ
         "제공된 [Dialogue]를 [Scoring Criteria]에 따라 평가하고, 각 항목별 점수(1-5점)와 상세 이유를 JSON 형식으로 출력하세요.",
         "**매우 중요: JSON 응답의 `scoring` 및 `explanation` 객체에서는 반드시 각 평가 기준 항목의 인덱스(0, 1, 2, ...)를 문자열 키('0', '1', '2', ...)로 사용해야 합니다.**",
         "# Context",
-        "## Scoring Criteria (Index: ID(Name): Description)",
+        "## Scoring Criteria",
         criteria_descriptions, # 인덱스와 함께 기준 표시
         "## Dialogue",
         dialogue,
@@ -243,9 +300,9 @@ def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_templ
 from typing import List, Dict, Any
 
 def get_category_prompt(prompt_category: str,
-                        conversation_summary: str, # 이 변수는 현재 프롬프트 내에서 사용되지 않음 (필요시 제거 또는 활용)
+                        dialogue: str, # 변수명 변경 및 타입 명시 (이전: conversation_summary)
                         scoring_results: Dict[str, Any]):
-    """Generate prompt for coaching category recommendation (지시 명확화)"""
+    """Generate prompt for coaching category recommendation (지시 명확화, explanation 타입 검사 추가)"""
     # Format evaluation results correctly from the expected structure
     formatted_evaluation = "평가 결과 분석 실패"
     if isinstance(scoring_results, dict):
@@ -256,14 +313,17 @@ def get_category_prompt(prompt_category: str,
         if isinstance(scoring_dict, dict) and isinstance(explanation_dict, dict):
             evaluation_lines = []
             # Iterate through the keys (assumed to be index strings like '0', '1', ... based on scoring prompt)
-            # Need a way to map these index strings back to actual criterion IDs if needed, 
-            # but for display here, we might just use the explanations.
-            # Assuming scoring_index_to_id mapping is available or passed if needed elsewhere.
-            for index_key in explanation_dict.keys():
-                score = scoring_dict.get(index_key, 'N/A') # Get score using index key
-                explanation = explanation_dict.get(index_key, '설명 없음') # Get explanation using index key
-                # Ideally, map index_key back to criterion ID (e.g., using scoring_index_to_id)
-                # For now, just display index for simplicity in this prompt:
+            for index_key in explanation_dict.keys(): # explanation_dict의 키를 기준으로 반복
+                score = scoring_dict.get(index_key, 'N/A') # 스코어 가져오기
+                explanation_value = explanation_dict.get(index_key, '설명 없음') # 설명 가져오기
+                
+                # explanation_value가 문자열인지 확인 (TypeError 방지)
+                if not isinstance(explanation_value, str):
+                    print(f"경고: 스코어링 결과의 explanation 항목 '{index_key}' 값이 문자열이 아닙니다 (타입: {type(explanation_value)}). 값: {explanation_value}")
+                    explanation = "[설명 형식 오류]" # 기본값 사용
+                else:
+                    explanation = explanation_value
+
                 evaluation_lines.append(f"- 항목 {index_key} (점수: {score}/5): {explanation}") 
             
             if evaluation_lines:
@@ -275,21 +335,29 @@ def get_category_prompt(prompt_category: str,
     else:
         formatted_evaluation = f"평가 결과 타입 오류 (예상: dict, 실제: {type(scoring_results)})"
 
-    # 프롬프트 템플릿 수정 (지시 명확화)
+    # 대화 내용을 JSON 문자열로 변환 (프롬프트에 포함시키기 위함)
+    # dialogue 변수가 실제 대화 데이터 딕셔너리라고 가정
+    dialogue_str = json.dumps(dialogue, ensure_ascii=False, indent=2) if isinstance(dialogue, dict) else str(dialogue)
+
+    # 프롬프트 템플릿 수정 (지시 명확화, Dialogue 컨텍스트 추가)
     prompt_template = """
 {role}
 # Instruction
-**매우 중요:** 당신의 임무는 아래 제공된 [Evaluation Results]와 [Category Information] **두 가지 정보를 분석**하여, 개선이 가장 필요한 카테고리를 **1개 이상, 최대 3개까지** 선정하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
+**매우 중요:** 당신의 임무는 아래 제공된 [Dialogue], [Evaluation Results], [Category Information] **세 가지 정보를 종합적으로 분석**하여, 개선이 가장 필요한 카테고리를 **1개 이상, 최대 3개까지** 선정하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
 
 **절대로 추가 정보를 요청하거나, JSON 형식 외의 다른 텍스트(예: "Okay, I'm ready...")를 출력하지 마세요.** 당신은 이미 필요한 모든 정보를 받았습니다.
 
 # Context
+## 1. Dialogue (분석 대상 대화 내용)
+```json
+{dialogue_placeholder}
+```
 
-[Evaluation Results]
-- 다음은 이전 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고하여 어떤 영역에 개선이 필요한지 파악하세요.
+## 2. Evaluation Results (대화 평가 결과)
+- 다음은 위 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고하여 어떤 영역에 개선이 필요한지 파악하세요.
 {evaluation_results_placeholder}
 
-[Category Information] 
+## 3. Category Information (선택 가능한 카테고리 목록)
 - 아래 목록에서 개선이 필요하다고 판단되는 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 설명을 주의 깊게 살펴보세요.
 {prompt_category}
 
@@ -298,7 +366,7 @@ def get_category_prompt(prompt_category: str,
 - **반드시** 아래 명시된 **JSON 형식**으로만 응답해야 합니다. 다른 텍스트는 절대 포함하지 마세요.
 - 최상위 키는 `"selected_categories"` (JSON 배열)와 `"overall_reason"` (문자열) 이어야 합니다.
 - `"selected_categories"` 배열 안에는 선택된 각 카테고리에 대한 **JSON 객체**가 포함됩니다.
-- 각 카테고리 객체는 반드시 `"id"` (카테고리 정보에 명시된 ID), `"name"` (카테고리 이름), `"priority"` (숫자 1-3, 1이 가장 시급), `"reason"` (선정 이유, **반드시 평가 결과 내용 인용**) 키를 가져야 합니다.
+- 각 카테고리 객체는 반드시 `"id"` (카테고리 정보에 명시된 ID), `"name"` (카테고리 이름), `"priority"` (숫자 1-3, 1이 가장 시급), `"reason"` (선정 이유, **반드시 대화 내용과 평가 결과 내용 모두 인용**) 키를 가져야 합니다.
 - 배열 내 객체와 객체 사이에는 반드시 쉼표(,)를 사용하세요 (마지막 객체 제외).
 - 모든 키와 문자열 값은 **큰따옴표("")**로 감싸야 합니다.
 
@@ -306,24 +374,24 @@ def get_category_prompt(prompt_category: str,
 ```json
 {{
   "selected_categories": [
-    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1", "priority": 1, "reason": "선정 이유 1 (평가 결과 항목 X의 내용 '...'을 볼 때 시급히 개선 필요)"}},
-    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2", "priority": 2, "reason": "선정 이유 2 (평가 결과 항목 Y의 내용 '...' 관련하여 개선 필요)"}}
+    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1", "priority": 1, "reason": "선정 이유 1 (대화 중 '...' 발언과 평가 결과 항목 X의 내용 '...'을 볼 때 시급히 개선 필요)"}},
+    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2", "priority": 2, "reason": "선정 이유 2 (대화 중 '...' 상황과 평가 결과 항목 Y의 내용 '...' 관련하여 개선 필요)"}}
   ],
   "overall_reason": "종합적인 선정 이유 요약 (예: 평가 결과를 종합할 때 ID 1과 ID 2 카테고리 개선이 가장 중요하다고 판단됨)"
 }}
 ```
 
 [주의사항]
-- 선정 이유는 반드시 **[Evaluation Results] 섹션에 제시된 구체적인 내용**을 근거로 작성하세요.
+- 선정 이유는 반드시 **[Dialogue] 및 [Evaluation Results] 섹션에 제시된 구체적인 내용**을 근거로 작성하세요.
 - **다시 한번 강조합니다: 추가 질문이나 JSON 외의 응답은 절대 하지 마세요. 주어진 정보로 JSON만 생성하세요.**
 """
 
     # Use .format() to insert all required values into the standard string
     return prompt_template.format(
         role=role,
-        evaluation_results_placeholder=formatted_evaluation, # Insert the correctly formatted string
+        dialogue_placeholder=dialogue_str, # 대화 내용 삽입
+        evaluation_results_placeholder=formatted_evaluation,
         prompt_category=prompt_category
-        # conversation_summary is not used in the template, so removed from .format()
     )
 
 def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
