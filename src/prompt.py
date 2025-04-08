@@ -297,7 +297,7 @@ def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_templ
         "# Instruction",
         "- 제공된 [Dialogue]를 [Scoring Criteria]에 따라 평가하고, 각 항목별 점수(1-5점)와 상세 이유를 JSON 형식으로 출력하세요.",
         "- **매우 중요: JSON 응답의 `scoring` 및 `explanation` 객체에서는 반드시 각 평가 기준 항목의 인덱스(0, 1, 2, ...)를 문자열 키('0', '1', '2', ...)로 사용해야 합니다.**",
-        "- 다음 [Child Age] 의 아이 나이 정보를 참고해 주세요. [Dialogue] 에 언급되는 나이는 무시해도 됩니다.",
+        "- 다음 [Child Age] 의 아이 나이 정보를 참고해 주세요. [Dialogue] 에 언급되는 나이는 무시해 주세요.",
         "- 부모의 양육 태도에 초점을 두고 평가해 주세요.",
         "",
         "# Context",
@@ -444,6 +444,7 @@ def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, d
 # Context
 [Child Age]
 - 아이 연령: {child_age} 개월
+- [Dialogue] 에 언급되는 나이는 무시해 주세요.
 
 [Dialouge Scoring]
 {formatted_scoring_results}
