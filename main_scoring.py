@@ -1,15 +1,10 @@
 import os
-import random
-import json
 from typing import List, Dict, Any, Optional, Tuple
-import yaml
 import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf, DictConfig
 from dataclasses import dataclass
-import requests
 from dotenv import load_dotenv
-import re
 import time
 from tqdm import tqdm
 from pathlib import Path
@@ -17,15 +12,13 @@ import pandas as pd
 from src.llm_client import create_llm_client
 from src.llm_interface import get_llm_response
 from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
-
 from src.prep_map_survey import FamilyPersona
-from src.prompt import  generate_category_from_survey, generate_llm_prompts, create_counselor_family_prompt, get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only
-
-from src.prep_map_category import category_name_english, category_name, category_id, theme_name_english, theme_name, theme_id, plan_name_english, plan_name, plan_id
-from src.prep import parse_json_response, load_and_parse_json_data, load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys, levenshtein_distance, reconstruct_dialogue, find_persona, save_response_to_file, save_dialogue_to_file
+from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only
+from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
+from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file
+#load_and_parse_json_data, levenshtein_distance,save_dialogue_to_file
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
-
 # API 키 설정
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api")
@@ -122,7 +115,6 @@ def main(cfg: AppConfig) -> None:
     df = pd.read_csv(data_path, encoding='utf-8-sig')
     data_plan_path = data_prep_path / Path('preped_plan.csv') 
     df_plan = pd.read_csv(data_plan_path, encoding='utf-8-sig')
-
     map_plan = df_plan[[plan_id, plan_name_english]]
     
     # --- 매핑 생성 (함수 호출, 변수명 변경) --- 
@@ -139,7 +131,7 @@ def main(cfg: AppConfig) -> None:
     # --- 매핑 생성 완료 ---
 
     # prompt_category_info = generate_llm_prompts(df) # 함수명 변경 고려 (이제 프롬프트 전체가 아님)
-    category_info_only = generate_category_info_only(df)
+    
     output_path = cwd / Path("outputs") / Path(model_name) 
     
     output_scoring_path = cwd / Path("outputs") / Path(model_name) / Path("3_scoring")
@@ -174,6 +166,11 @@ def main(cfg: AppConfig) -> None:
         i_df= df_survey.iloc[i,:]
         i_family = family.get_persona_data(i)
         child_age = i_df['아이 연령']
+
+        df_category = df[df['min_month'] <= child_age]
+        df_category = df_category[df_category['max_month'] >= child_age]
+        print(f"연령에 적합한 Category id 목록: {df_category[category_id]}")
+        category_info_only = generate_category_info_only(df_category)
     #for i in tqdm(range(family.get_persona_count())):
         index_persona = f"Persona_{i}"
         json_file = find_persona(i, data_target_path)
@@ -208,7 +205,9 @@ def main(cfg: AppConfig) -> None:
                 prompt = get_scoring_prompt(
                     dialogue=formatted_dialogue,  # 재구성된 대화 문자열 사용
                     scoring_criteria=scoring_criteria_list,
-                    output_template_str=scoring_template_str
+                    output_template_str=scoring_template_str, 
+                    detailed_criteria= cfg.prompt.scoring.detailed_criteria,
+                    child_age=child_age
                 )
                 
                 # 디버깅을 위한 로깅 추가
@@ -253,14 +252,13 @@ def main(cfg: AppConfig) -> None:
         print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
         
         prompt = get_category_prompt(prompt_category=category_info_only,
-                dialogue=dialogue_data,
                 scoring_results=scoring_data, # Pass the original dictionary
-
+                child_age=child_age,
             )
         prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_Category_{name_param}_prompt.txt")
         save_llm_prompts_to_txt(prompt, prompt_category_path)
-        # Step 4의 예상 최상위 키 수정
-        expected_category_keys = ["selected_categories"] 
+        # Step 4의 예상 최상위 키 수정: overall_reason 추가
+        expected_category_keys = ["selected_categories", "overall_reason"] 
         category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_category_keys)
         
         # category_data가 None이거나 필요한 키가 없는 경우 처리
@@ -309,7 +307,7 @@ def main(cfg: AppConfig) -> None:
         print(f"연령에 적합한 plan id 목록: {plans_info[plan_id]}")
         relevant_plans_info = gen_plan_info(plans_info)
         prompt_plan_path = os.path.join(prompt_path, f"{index_persona}_Step_5_Plan_{name_param}_prompt.txt")
-        prompt = get_plan_prompt(scoring_results=scoring_data, relevant_plans_info=relevant_plans_info)
+        prompt = get_plan_prompt(scoring_results=scoring_data, relevant_plans_info=relevant_plans_info, child_age=child_age, dialogue=formatted_dialogue, is_dialogue=cfg.prompt.plan.is_dialogue)
         save_llm_prompts_to_txt(prompt, prompt_plan_path)
         plan_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['conversation_analysis', 'recommended_plans'])
         output_file = os.path.join(
@@ -352,10 +350,10 @@ def main(cfg: AppConfig) -> None:
             'plan_reason_list': plans_reason,
             'plan_effect_list': plans_effect,
             'child_age': child_age,
-            # 처음 3개의 추천 플랜 ID를 개별 컬럼으로 추가
-            'LLM_plan_rec_1': plans_id[0] if len(plans_id) > 0 else None,
-            'LLM_plan_rec_2': plans_id[1] if len(plans_id) > 1 else None,
-            'LLM_plan_rec_3': plans_id[2] if len(plans_id) > 2 else None
+            # 처음 3개의 추천 플랜 ID를 개별 컬럼으로 추가 (안전하게 처리)
+            'LLM_plan_rec_1': plans_id[0] if plans_id else None,  # 리스트가 비어있지 않으면 첫 번째 값
+            'LLM_plan_rec_2': plans_id[1] if len(plans_id) > 1 else None,  # 두 번째 값이 있으면 사용
+            'LLM_plan_rec_3': plans_id[2] if len(plans_id) > 2 else None   # 세 번째 값이 있으면 사용
         }
         
         # 단일 행 DataFrame 생성 (이제 리스트가 값으로 들어감)

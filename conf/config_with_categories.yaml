@@ -35,6 +35,13 @@ model:
 
 prompt:
   top_k: 3
+  scoring:
+    detailed_criteria: true
+  category:
+    detailed_criteria: true
+  plan:
+    is_dialogue: true
+    detailed_criteria: true
 # Evaluation settings: Scoring and Problem Types
 
 # Scoring criteria definitions (from scoring.yaml)
@@ -104,16 +111,16 @@ output_formats:
     template: |
       {
         "scoring": {
-          "0": 0,
-          "1": 0,
-          "2": 0,
-          "3": 0
+          "0": 각 항목 별 점수,
+          "1": 각 항목 별 점수,
+          "2": 각 항목 별 점수,
+          "3": 각 항목 별 점수
         },
         "explanation": {
-          "0": "Index 0 점수 이유",
-          "1": "Index 1 점수 이유",
-          "2": "Index 2 점수 이유",
-          "3": "Index 3 점수 이유"
+          "0": 각 항목 별 점수에 대한 설명,
+          "1": 각 항목 별 점수에 대한 설명,
+          "2": 각 항목 별 점수에 대한 설명,
+          "3": 각 항목 별 점수에 대한 설명
         }
       }
 

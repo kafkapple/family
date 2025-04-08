@@ -1,11 +1,14 @@
 from typing import Dict, Any, List
 import json
-from src.prep_map_category import category_name_english, category_name, category_id, theme_name_english, theme_name, theme_id, plan_name_english, plan_name, plan_id, category_keywords, category_description, plan_keywords
+from src.prep_map_category import category_name_english, category_name, category_id,  plan_name, plan_id, category_keywords, category_description, plan_keywords
+#theme_name_english, theme_name, theme_id, plan_name_english,
 
 # - 전문가 경험, 가족 페르소나, 도움이 될 수 있는 코칭 플랜 정보를 종합해 고려합니다.
 role = """
 # Role
-- 당신은 수십 년간 부모와 아이, 가족 간의 갈등 및 부정적인 대화를 관찰해온 심리 상담 전문가 입니다.
+- 당신은 수십 년간 부모와 아이, 가족 간의 갈등 및 부정적인 대화를 관찰하고 분석해온 심리 상담 전문가 입니다.
+- 당신은 따뜻하면서도 세심한 시선으로 주의 깊게 가족의 대화를 들여다 보고, 각 가족에게 상황에 적합한 코칭 플랜을 추천하고 그 이유를 논리적이면서도 쉽게 이해할 수 있도록 설명해주는 전문가 입니다.
+- 당신 덕분에 많은 가족들은 육아 과정에서 더 나은 방법을 찾아가고, 더 나은 관계를 유지할 수 있습니다.
 """
 
 def gen_plan_info(df_plan):
@@ -27,7 +30,7 @@ def gen_plan_info(df_plan):
         prompt_lines.append(f"  ID: {row[plan_id]}")
         prompt_lines.append(f"   Plan Name: {row[plan_name]}")
         # prompt_lines.append(f"   Description: {row['Course_description']}")
-        # prompt_lines.append(f"   Keywords: {keyword}")
+        prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
 
     return "\n".join(prompt_lines)
@@ -259,38 +262,64 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
 
 from typing import List, Dict, Any
 
-def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_template_str: str) -> str:
-    """스코어링을 위한 프롬프트를 생성합니다. (인덱스 키 사용)"""
-    # scoring_criteria 리스트에서 인덱스와 ID, 설명을 포함한 문자열 생성
-    criteria_descriptions = "\n".join([
-        f"- Index {idx}: `{c['id']}` ({c.get('name', '')})\n  Description: {c.get('description', '')}" 
-        for idx, c in enumerate(scoring_criteria)
-    ])
+def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_template_str: str, detailed_criteria: bool = False, child_age: str = '') -> str:
+    """스코어링을 위한 프롬프트를 생성합니다. (인덱스 키 사용, 상세 기준 옵션 추가)"""
+    
+    # scoring_criteria 리스트에서 정보를 포함한 문자열 생성
+    description_lines = []
+    if detailed_criteria:
+        description_lines.append("[Scoring Criteria]")
+        for idx, c in enumerate(scoring_criteria):
+            description_lines.append(f"- Index {idx}: `{c['id']}` ({c.get('name', '')})")
+            description_lines.append(f"  Description: {c.get('description', '')}")
+            # Aspects 추가
+            if 'aspects' in c and isinstance(c['aspects'], list):
+                description_lines.append("  Aspects:")
+                description_lines.extend([f"    - {aspect}" for aspect in c['aspects']])
+            # Scoring Guide 추가
+            if 'scoring_guide' in c and isinstance(c['scoring_guide'], dict):
+                description_lines.append("  Scoring Guide:")
+                for score, guide_text in sorted(c['scoring_guide'].items()):
+                    description_lines.append(f"    {score}: {guide_text}")
+            description_lines.append("") # 기준 간 간격 추가
+    else: # 기본 (간단) 버전
+        description_lines.append("[Scoring Criteria]")
+        for idx, c in enumerate(scoring_criteria):
+            description_lines.append(f"- Index {idx}: `{c['id']}` ({c.get('name', '')})")
+            
+    criteria_descriptions = "\n".join(description_lines)
+    
     # LLM에게 사용할 정확한 인덱스 키 목록 (문자열 형태)
     valid_index_keys = [str(i) for i in range(len(scoring_criteria))] 
 
     prompt_parts = [
         role,
         "# Instruction",
-        "제공된 [Dialogue]를 [Scoring Criteria]에 따라 평가하고, 각 항목별 점수(1-5점)와 상세 이유를 JSON 형식으로 출력하세요.",
-        "**매우 중요: JSON 응답의 `scoring` 및 `explanation` 객체에서는 반드시 각 평가 기준 항목의 인덱스(0, 1, 2, ...)를 문자열 키('0', '1', '2', ...)로 사용해야 합니다.**",
+        "- 제공된 [Dialogue]를 [Scoring Criteria]에 따라 평가하고, 각 항목별 점수(1-5점)와 상세 이유를 JSON 형식으로 출력하세요.",
+        "- **매우 중요: JSON 응답의 `scoring` 및 `explanation` 객체에서는 반드시 각 평가 기준 항목의 인덱스(0, 1, 2, ...)를 문자열 키('0', '1', '2', ...)로 사용해야 합니다.**",
+        "- 다음 [Child Age] 의 아이 나이 정보를 참고해 주세요. [Dialogue] 에 언급되는 나이는 무시해도 됩니다.",
+        "- 부모의 양육 태도에 초점을 두고 평가해 주세요.",
+        "",
         "# Context",
-        "## Scoring Criteria",
-        criteria_descriptions, # 인덱스와 함께 기준 표시
-        "## Dialogue",
+        
+        f"[Child Age]: {child_age} 개월",
+        # criteria_descriptions, # 수정 전: 위치 변경
+        "[Dialogue]",
         dialogue,
+        "",
+        criteria_descriptions, # Dialogue 뒤로 이동하여 기준을 더 잘 볼 수 있게 함
         "",
         "## Output Format **[매우 중요!]**",
         "- 평가는 반드시 아래 명시된 JSON 형식을 정확히 따라야 합니다.",
-        f"- 'scoring' 객체의 키는 반드시 다음 인덱스 문자열 목록에 있는 값만 **정확히** 사용해야 합니다: `{valid_index_keys}`", # 인덱스 키 목록 강조
-        f"- 'explanation' 객체의 키도 반드시 동일한 인덱스 문자열 목록을 **정확히** 사용해야 합니다: `{valid_index_keys}`", # 인덱스 키 목록 강조
+        f"- 'scoring' 객체의 키는 반드시 다음 인덱스 문자열 목록에 있는 값만 **정확히** 사용해야 합니다: `{valid_index_keys}`",
+        f"- 'explanation' 객체의 키도 반드시 동일한 인덱스 문자열 목록을 **정확히** 사용해야 합니다: `{valid_index_keys}`",
         "- 모든 문자열 값은 큰따옴표(\"\")로 감싸야 합니다.",
         "- 점수는 1~5 사이의 정수만 사용하세요.",
         "- **JSON 객체 외에 다른 설명이나 텍스트를 절대 포함하지 마세요.**",
         "```json",
-        "{\n  \"scoring\": {\n    \"0\": 0, // Index 0 점수\n    \"1\": 0, // Index 1 점수\n    \"2\": 0, // Index 2 점수\n    \"3\": 0  // Index 3 점수\n  },\n  \"explanation\": {\n    \"0\": \"Index 0 점수 이유\",\n    \"1\": \"Index 1 점수 이유\",\n    \"2\": \"Index 2 점수 이유\",\n    \"3\": \"Index 3 점수 이유\"\n  }\n}", # 프롬프트 내에 직접 예시 제공
+        output_template_str.strip(), # YAML에서 로드한 템플릿 사용
         "```",
-        f"**다시 한번 강조합니다: `scoring` 및 `explanation` 객체의 키는 반드시 `{valid_index_keys}` 목록의 인덱스 문자열과 정확히 일치해야 합니다.**" # 키 목록 재강조
+        f"**다시 한번 강조합니다: `scoring` 및 `explanation` 객체의 키는 반드시 `{valid_index_keys}` 목록의 인덱스 문자열과 정확히 일치해야 합니다.**"
     ]
 
     return "\n".join(prompt_parts)
@@ -300,11 +329,7 @@ def get_scoring_prompt(dialogue: str, scoring_criteria: List[Dict], output_templ
 # ... (이하 Meta-Plan 주석) ...
 from typing import List, Dict, Any
 
-def get_category_prompt(prompt_category: str,
-                        dialogue: str, # 변수명 변경 및 타입 명시 (이전: conversation_summary)
-                        scoring_results: Dict[str, Any]):
-    """Generate prompt for coaching category recommendation (지시 명확화, explanation 타입 검사 추가)"""
-    # Format evaluation results correctly from the expected structure
+def format_scoring_results(scoring_results: Dict[str, Any]) -> str:
     formatted_evaluation = "평가 결과 분석 실패"
     if isinstance(scoring_results, dict):
         scoring_dict = scoring_results.get('scoring') # Get inner dict
@@ -336,31 +361,34 @@ def get_category_prompt(prompt_category: str,
     else:
         formatted_evaluation = f"평가 결과 타입 오류 (예상: dict, 실제: {type(scoring_results)})"
 
+    return formatted_evaluation
+def get_category_prompt(prompt_category: str,
+                        child_age: str,
+                        scoring_results: Dict[str, Any]):
+    """Generate prompt for coaching category recommendation (지시 명확화, explanation 타입 검사 추가)"""
+    # Format evaluation results correctly from the expected structure
+    
     # 대화 내용을 JSON 문자열로 변환 (프롬프트에 포함시키기 위함)
     # dialogue 변수가 실제 대화 데이터 딕셔너리라고 가정
-    dialogue_str = json.dumps(dialogue, ensure_ascii=False, indent=2) if isinstance(dialogue, dict) else str(dialogue)
-
+    #dialogue_str = json.dumps(dialogue, ensure_ascii=False, indent=2) if isinstance(dialogue, dict) else str(dialogue)
+    formatted_evaluation = format_scoring_results(scoring_results)
     # 프롬프트 템플릿 수정 (지시 명확화, Dialogue 컨텍스트 추가)
     prompt_template = """
 {role}
 # Instruction
-**매우 중요:** 당신의 임무는 아래 제공된 [Dialogue], [Evaluation Results], [Category Information] **세 가지 정보를 종합적으로 분석**하여, 개선이 가장 필요한 카테고리를 **1개 이상, 최대 3개까지** 선정하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
-
-**절대로 추가 정보를 요청하거나, JSON 형식 외의 다른 텍스트(예: "Okay, I'm ready...")를 출력하지 마세요.** 당신은 이미 필요한 모든 정보를 받았습니다.
+- **매우 중요:** 당신의 임무는 아래 제공된 [Child Age], [Evaluation Results], [Category Information] **정보를 종합적으로 분석**하여, 육아 과정에 개선 및 보완이 필요한 카테고리를 **1개 이상 선정**하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
 
 # Context
-## 1. Dialogue (분석 대상 대화 내용)
-```json
-{dialogue_placeholder}
-```
+[Child Age]
+- 아이 연령: {child_age} 개월
 
-## 2. Evaluation Results (대화 평가 결과)
-- 다음은 위 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고하여 어떤 영역에 개선이 필요한지 파악하세요.
+[Evaluation Results]
+- 다음은 육아 과정 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고해 주세요.
 {evaluation_results_placeholder}
 
-## 3. Category Information (선택 가능한 카테고리 목록)
-- 아래 목록에서 개선이 필요하다고 판단되는 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 관련 키워드를 주의 깊게 살펴보고, 높은 우선순위부터 차례대로 선택해 주세요.
-- 만약 모든 항목의 점수가 높은 경우에는, category id: 1 "발달_단계_연령_중심" 을 우선 추천하고, 적절한 이유를 설명해 주세요.
+[ategory Information]
+- 반드시 아래 목록에서 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 관련 키워드를 주의 깊게 살펴보고, 높은 관련성, 우선순위부터 차례대로 선택해 주세요.
+- 만약 모든 항목의 점수가 높거나 특별한 추천 항목이 생각나지 않는 경우에는, category id: 1 "발달_단계_연령_중심" 을 우선 추천하고, 적절한 이유를 설명해 주세요.
 {prompt_category}
 
 # Output Format
@@ -391,26 +419,38 @@ def get_category_prompt(prompt_category: str,
     # Use .format() to insert all required values into the standard string
     return prompt_template.format(
         role=role,
-        dialogue_placeholder=dialogue_str, # 대화 내용 삽입
+        child_age=child_age,
         evaluation_results_placeholder=formatted_evaluation,
         prompt_category=prompt_category
     )
 
-def get_plan_prompt(scoring_results, relevant_plans_info: str):
+def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, dialogue: str, is_dialogue: bool = False):
     """Generate prompt for specific coaching plan recommendation (f-string 제거 및 포맷팅 개선)"""
     # 딕셔너리를 읽기 좋은 JSON 문자열로 포맷팅
-    scoring_str = json.dumps(scoring_results, ensure_ascii=False, indent=2)
-
+    formatted_scoring_results = format_scoring_results(scoring_results)
+    if is_dialogue:
+        context = f"[Dialogue]\n{dialogue}"
+    else:
+        context = ""
     # 표준 문자열 사용 (f-string 아님)
     prompt_template = """
 {role}
-- 아래 정보들을 종합적으로 고려하여, 아이에게 가장 적합한 구체적인 코칭 플랜들을 우선 순위대로 추천하고 그 이유와 기대 효과를 설명해주세요.
+# Instruction
+- 아래 정보들을 종합적으로 고려하여, 부모에게 권하고 싶은 플랜들을 최대한 많이, 우선 순위대로 추천하고 그 이유와 기대 효과를 설명해주세요.
+- 반드시'[Relevant Plans Information]'에 제시된 플랜들 중에서만 추천해 주세요.
+- 추천 이유(`reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
+- 기대 효과(`expected_effect`)는 해당 플랜을 통해 부모의 어떤 점이 개선될 수 있는지 명확하게 기술해야 합니다.
 
 # Context
-## Conversation Scoring
-{scoring_results_str}
+[Child Age]
+- 아이 연령: {child_age} 개월
 
-## Relevant Plans Information
+[Dialouge Scoring]
+{formatted_scoring_results}
+
+{context}
+
+[Relevant Plans Information]
 {relevant_plans_info}
 
 # Output Format
@@ -437,15 +477,22 @@ def get_plan_prompt(scoring_results, relevant_plans_info: str):
 - 모든 키와 문자열 값은 큰따옴표("")로 감싸야 합니다.
 - JSON 객체 외에 다른 텍스트를 포함하지 마세요.
 
-[추천 가이드라인]
-- 위 '[Relevant Plans Information]'에 제시된 플랜들을 우선적으로 고려하되, 필요시 연령 및 대화 맥락에 더 적합한 다른 플랜을 추천할 수도 있습니다.
-- 추천 이유(`reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
-- 기대 효과(`expected_effect`)는 해당 플랜을 통해 아이의 어떤 점이 개선될 수 있는지 명확하게 기술해야 합니다.
+
 """
     # .format() 메소드를 사용하여 모든 플레이스홀더 채우기
     prompt = prompt_template.format(
         role=role,
-        scoring_results_str=scoring_str,
-        relevant_plans_info=relevant_plans_info
+        formatted_scoring_results=formatted_scoring_results,
+        relevant_plans_info=relevant_plans_info,
+        child_age=child_age,
+        context=context
     )
     return prompt
+
+
+
+# **절대로 추가 정보를 요청하거나, JSON 형식 외의 다른 텍스트(예: "Okay, I'm ready...")를 출력하지 마세요.** 당신은 이미 필요한 모든 정보를 받았습니다.
+# ## 1. Dialogue (분석 대상 대화 내용)
+# ```json
+# {dialogue_placeholder}
+# ```

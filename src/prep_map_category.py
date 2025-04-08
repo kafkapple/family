@@ -90,7 +90,7 @@ course_description = 'course_description'
 
 cols_text = [plan_keywords, course_description] #, 'parenting_env', 'tag']
 
-category_keywords = 'keyword'
+category_keywords = 'concatenated_keywords'
 category_description = 'concatenated_descriptions'
 
 cols_examples = ['example_'+str(i+1) for i in range(5)]
@@ -102,7 +102,7 @@ cols_text_category = [category_keywords, category_description]
 cols_name = [category_name, category_name_english, plan_name, plan_name_english, theme_name, theme_name_english]
 cols_id = [plan_id, category_id, theme_id]
 cols = cols_id + cols_name + cols_numeric + cols_examples + cols_text
-cols_category = [category_id, category_name, category_name_english] + cols_text_category
+cols_category = [category_id, category_name, category_name_english] + cols_text_category + cols_month
 
 import pandas as pd
 from collections import OrderedDict
@@ -203,52 +203,82 @@ def prep_metadata(df, output_path, is_print=False):
                 print(f"Examples:\n {j_df[cols_examples]}")
     df.to_csv(output_path, index=True, encoding='utf-8-sig')
     return df
-def prep_category(df, columns_to_keep = cols_category):
+
+def prep_category(df, columns_to_keep=cols_category):
     """
     Processes the DataFrame to extract unique keywords from 'tag' column,
-    replaces '-' values in 'example_' columns, and concatenates unique course descriptions
-    for each category.
+    replaces '-' values in 'example_' columns, concatenates unique course descriptions,
+    and aggregates min_month and max_month for each category.
 
     Args:
         df (pd.DataFrame): Input DataFrame.
+        columns_to_keep (list): List of columns to keep in the final output.
 
     Returns:
-        pd.DataFrame: Processed DataFrame with 'keyword' column and concatenated descriptions.
+        pd.DataFrame: Processed DataFrame with aggregated months and other info.
     """
 
-    # Extract unique keywords by category
+    # --- Keyword processing ---
     keywords_map = {}
+    keyword_source_col = plan_keywords # 정의된 변수 사용
     for group_name, group_df in df.groupby(category_id):
-        # Initialize empty set for this category
         keywords_map[group_name] = set()
-        for tags in group_df[plan_keywords].dropna():  # Handle NaN values
-            keywords_map[group_name].update(tags.split(', '))  # Split and update the set
-
-    # Assign the unique keywords back to each row based on category
+        for tags in group_df[keyword_source_col].dropna():
+            keywords_map[group_name].update(tags.split(', ')) 
     df[category_keywords] = df[category_id].apply(
         lambda x: ', '.join(sorted(keywords_map.get(x, set())))
     )
 
-    # Replace '-' values in 'example_' columns
+    # --- Example processing ---
     example_cols = [col for col in df.columns if 'example_' in col]
     for col in example_cols:
-        # Find the first non '-' value in the column
         first_valid_value = df[col][df[col] != '-'].iloc[0] if not df[col][df[col] == '-'].empty else None
         if first_valid_value:
             df[col] = df[col].replace('-', first_valid_value)
 
-    # Concatenate unique descriptions for each category
+    # --- Description concatenation ---
     concatenated_descriptions = {}
     for i_key in df[category_id].unique():
         i_df = df[df[category_id] == i_key]
         unique_descriptions = i_df[course_description].unique()
         concatenated_descriptions[i_key] = ' '.join(unique_descriptions)
-
-    # Add concatenated descriptions to the DataFrame
     df[category_description] = df[category_id].map(concatenated_descriptions)
-        
-    # Create a new DataFrame with only the desired columns
-    df_category = df[columns_to_keep].drop_duplicates(subset=[category_id]).sort_values(by=category_id)
+
+    # --- Month aggregation ---
+    min_month_col = 'min_month'
+    max_month_col = 'max_month'
+    if min_month_col not in df.columns or max_month_col not in df.columns:
+        raise ValueError(f"'{min_month_col}' or '{max_month_col}' columns not found in DataFrame.")
+
+    aggregated_months = df.groupby(category_id).agg(
+        min_month_agg=(min_month_col, 'min'),
+        max_month_agg=(max_month_col, 'max')
+    ).reset_index()
+
+    # --- Create final category DataFrame ---
+    # Define base columns (excluding potentially varying ones like months for unique check)
+    base_columns = [col for col in columns_to_keep if col not in [min_month_col, max_month_col]]
+    # Ensure category_id is included for merging
+    if category_id not in base_columns:
+        base_columns.insert(0, category_id)
+    # Ensure the columns actually exist in df before selecting
+    existing_base_columns = [col for col in base_columns if col in df.columns]
+    if not existing_base_columns:
+        raise ValueError("No valid base columns found to create the category DataFrame.")
+
+    # Use set to avoid duplicate columns if category_id was already in base_columns
+    df_category = df[list(set(existing_base_columns))].drop_duplicates(subset=[category_id]).sort_values(by=category_id)
+
+    # Merge the aggregated month data
+    df_category = pd.merge(df_category, aggregated_months, on=category_id, how='left')
+
+    # Rename aggregated columns back to original names
+    df_category.rename(columns={'min_month_agg': min_month_col, 'max_month_agg': max_month_col}, inplace=True)
+
+    # Reorder columns to match the original intended order in columns_to_keep
+    final_columns = [col for col in columns_to_keep if col in df_category.columns]
+    df_category = df_category[final_columns]
+
     df_category.reset_index(drop=True, inplace=True)
 
     return df_category
@@ -265,7 +295,7 @@ def main():
     # df['id_category'] = df['labeling']
     data_prep_path = Path('data/prep')
     os.makedirs(data_prep_path, exist_ok=True)
-    output_path = data_prep_path / Path('plan_metadata.csv')
+    output_path = data_prep_path / Path('metadata_plan_all.csv')
     df = prep_metadata(df=df, output_path = output_path, is_print=True)
 # For recommendation
     df = df[df[category_id]!=0] # remove 입문 플랜
