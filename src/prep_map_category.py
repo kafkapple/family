@@ -1,4 +1,3 @@
-
 import pandas as pd
 import os
 from pathlib import Path
@@ -9,8 +8,7 @@ from pathlib import Path
 #     '생활': 'Life',
 #     '공감': 'Empathy'
 # }
-
-level2_to_english = {
+category_to_english = {
     '발달_단계_연령_중심': 'developmental_age_focused',
     '시기_생활_이벤트_중심': 'life_event_focused',
     '부모_양육자_대화_및_자기관리': 'parent_communication_selfcare',
@@ -20,7 +18,25 @@ level2_to_english = {
     '놀이_상호작용': 'play_interaction',
     '관계_소통_전반': 'relationship_communication'
 }
-level3_to_english = {
+theme_to_english = {
+'입문': 'intro',
+'발달': 'development',
+'등하원 기관 적응': 'adaptation',
+'놀이터': 'playground',
+'양육자 자기연결': 'parent_self_connection',
+'육아 중 부부대화': 'couple_talk',
+'육아번아웃 다루기': 'parent_burnout',
+'기관-동료양육자들과의 소통법': 'communication_with_peers',
+'감정과 욕구': 'emotion_needs',
+'생활지도': 'life_guidance',
+'형제남매친구 중재': 'sibling_mediation',
+'자조능력': 'self_help',
+'놀이 상호작용': 'play_interaction',
+'미디어 사용': 'media_use',
+'거절하기와 거절듣기': 'rejection_skills',
+'칭찬하기': 'giving_praise',
+}
+plan_to_english = {
     '체험판': 'trial',
     '첫걸음': 'first_step',
     '3T': '3t',
@@ -57,14 +73,37 @@ level3_to_english = {
     '칭찬하기': 'giving_praise'
 }
 
+category_id = 'plan_group_id'
+category_name = 'plan_group_name'
+category_name_english = 'plan_group_name_english'
 
-cols_tags = ['Course_description', 'parenting_worries', 'parenting_env', 'tag']
+theme_id ='sub_plan_group_id'
+theme_name = 'sub_plan_group_name'
+theme_name_english = 'sub_plan_group_name_english'
 
-cols_name = ['CategoryName', 'CategoryName_English', 'PlanName', 'PlanName_English']
-cols_id = ['id_category', 'id_plan']
+plan_id = 'plan_id'
+plan_name = 'plan_name'
+plan_name_english = 'plan_name_english'
+
+plan_keywords = 'parenting_worries'
+course_description = 'course_description'
+
+cols_text = [plan_keywords, course_description] #, 'parenting_env', 'tag']
+
+category_keywords = 'keyword'
+category_description = 'concatenated_descriptions'
+
 cols_examples = ['example_'+str(i+1) for i in range(5)]
-cols_month = ['MinMonth', 'MaxMonth']
-cols_category = ['id_category', 'CategoryName','CategoryName_English', 'keyword', 'concatenated_descriptions'] + cols_month
+cols_month = ['min_month', 'max_month']
+cols_seasonality = ['seasonality_text']
+cols_numeric = cols_month + cols_seasonality
+cols_text_category = [category_keywords, category_description]
+
+cols_name = [category_name, category_name_english, plan_name, plan_name_english, theme_name, theme_name_english]
+cols_id = [plan_id, category_id, theme_id]
+cols = cols_id + cols_name + cols_numeric + cols_examples + cols_text
+cols_category = [category_id, category_name, category_name_english] + cols_text_category
+
 import pandas as pd
 from collections import OrderedDict
 
@@ -145,26 +184,26 @@ def print_keys_and_values(result):
         for key in result['sorted_keys'][pair_key]:
             print(f"    {key} → {result['pairs'][pair_key][key]}")
 
-def mappping_category(df, output_path, is_print=False):
+def prep_metadata(df, output_path, is_print=False):
     # Load CSV file with specified encoding and columns
 
-    df['CategoryName_English'] = df['CategoryName'].map(level2_to_english)
-    df['PlanName_English'] = df['PlanName'].map(level3_to_english)
-
-    df=df[cols_id+cols_name+cols_examples+cols_tags+cols_month]
+    df[category_name_english] = df[category_name].map(category_to_english)
+    df[plan_name_english] = df[plan_name].map(plan_to_english)
+    df[theme_name_english] = df[theme_name].map(theme_to_english)
+    df=df[cols]
 
     if is_print:
-        for i in df.groupby(['CategoryName']):
+        for i in df.groupby([category_name]):
             id = i[0]
             i_df = i[1]
             print(f"================category: {id}")#id)
-            for plan in i_df['PlanName']:
+            for plan in i_df[plan_name]:
                 print(f"===plan: {plan}")
-                j_df = i_df[i_df['PlanName']==plan]
+                j_df = i_df[i_df[plan_name]==plan]
                 print(f"Examples:\n {j_df[cols_examples]}")
     df.to_csv(output_path, index=True, encoding='utf-8-sig')
     return df
-def process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','CategoryName_English', 'keyword', 'concatenated_descriptions']):
+def prep_category(df, columns_to_keep = cols_category):
     """
     Processes the DataFrame to extract unique keywords from 'tag' column,
     replaces '-' values in 'example_' columns, and concatenates unique course descriptions
@@ -178,16 +217,16 @@ def process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','Cate
     """
 
     # Extract unique keywords by category
-    category_keywords = {}
-    for group_name, group_df in df.groupby('id_category'):
+    keywords_map = {}
+    for group_name, group_df in df.groupby(category_id):
         # Initialize empty set for this category
-        category_keywords[group_name] = set()
-        for tags in group_df['tag'].dropna():  # Handle NaN values
-            category_keywords[group_name].update(tags.split(', '))  # Split and update the set
+        keywords_map[group_name] = set()
+        for tags in group_df[plan_keywords].dropna():  # Handle NaN values
+            keywords_map[group_name].update(tags.split(', '))  # Split and update the set
 
     # Assign the unique keywords back to each row based on category
-    df['keyword'] = df['id_category'].apply(
-        lambda x: ', '.join(sorted(category_keywords.get(x, set())))  # Sort for consistency
+    df[category_keywords] = df[category_id].apply(
+        lambda x: ', '.join(sorted(keywords_map.get(x, set())))
     )
 
     # Replace '-' values in 'example_' columns
@@ -200,57 +239,50 @@ def process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','Cate
 
     # Concatenate unique descriptions for each category
     concatenated_descriptions = {}
-    for i_key in df['id_category'].unique():
-        i_df = df[df['id_category'] == i_key]
-        unique_descriptions = i_df['Course_description'].unique()
+    for i_key in df[category_id].unique():
+        i_df = df[df[category_id] == i_key]
+        unique_descriptions = i_df[course_description].unique()
         concatenated_descriptions[i_key] = ' '.join(unique_descriptions)
 
     # Add concatenated descriptions to the DataFrame
-    df['concatenated_descriptions'] = df['id_category'].map(concatenated_descriptions)
+    df[category_description] = df[category_id].map(concatenated_descriptions)
         
     # Create a new DataFrame with only the desired columns
-    df_category = df[columns_to_keep].drop_duplicates(subset=['id_category']).sort_values(by='id_category')
+    df_category = df[columns_to_keep].drop_duplicates(subset=[category_id]).sort_values(by=category_id)
     df_category.reset_index(drop=True, inplace=True)
 
     return df_category
 
 def main():
         
-    data_path='data/플랜 메타데이터 포맷 - labeling.csv'
+    data_path='data/플랜 메타데이터 포맷 - plan_table.csv' #labeling.csv'
     df = pd.read_csv(data_path, 
                     encoding='utf-8-sig'
                     )
     # Display first few rows to verify the data
     print(df.head())
-
-    df = df[df['Class']!='입문']
-    df['id_plan']=df.index
-    df['id_category'] = df['labeling']
-
+    #df['id_plan']=df.index
+    # df['id_category'] = df['labeling']
     data_prep_path = Path('data/prep')
     os.makedirs(data_prep_path, exist_ok=True)
-
     output_path = data_prep_path / Path('plan_metadata.csv')
- 
-    df = mappping_category(df=df, output_path = output_path, is_print=True)
-    # Apply the processing function
-    
-    column_pairs = [ ('id_category', 'CategoryName_English'), ('id_plan', 'PlanName_English')]
-    result = extract_unique_index_name_pairs(df, column_pairs=column_pairs)
-    print_keys_and_values(result)
+    df = prep_metadata(df=df, output_path = output_path, is_print=True)
+# For recommendation
+    df = df[df[category_id]!=0] # remove 입문 플랜
+    plan_path = data_prep_path / Path('preped_plan.csv')
+    df.to_csv(plan_path, index=False, encoding='utf-8-sig')
     # dict_category = result['pairs']['id_category_CategoryName_English']
     # print(dict_category)
-
-    
-    
-    df_category = process_dataframe(df, columns_to_keep = cols_category + cols_month)
+    df_category = prep_category(df, columns_to_keep = cols_category)
     print(df_category.head())
-    category_path = 'preped_category.csv'
-    plan_path = 'preped_plan.csv'
-    category_path = data_prep_path / Path(category_path)
-    plan_path = data_prep_path / Path(plan_path)
+    category_path = data_prep_path / Path('preped_category.csv')
     df_category.to_csv(category_path, index=False, encoding='utf-8-sig')
-    df.to_csv(plan_path, index=False, encoding='utf-8-sig')
+
+        # Apply the processing function
+    column_pairs = [ (category_id, category_name_english), (plan_id, plan_name_english)]#, (theme_id, theme_name_english)]
+    result = extract_unique_index_name_pairs(df, column_pairs=column_pairs)
+    print_keys_and_values(result)
+    
 
 if __name__ == '__main__':
     main()

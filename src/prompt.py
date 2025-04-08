@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 import json
+from src.prep_map_category import category_name_english, category_name, category_id, theme_name_english, theme_name, theme_id, plan_name_english, plan_name, plan_id, category_keywords, category_description, plan_keywords
 
 # - 전문가 경험, 가족 페르소나, 도움이 될 수 있는 코칭 플랜 정보를 종합해 고려합니다.
 role = """
@@ -18,13 +19,13 @@ def gen_plan_info(df_plan):
     Returns:
         str: A formatted string listing categories for the LLM prompt.
     """
-    df_unique_categories = df_plan.drop_duplicates(subset=['id_plan'])
-    prompt_lines = ["## Available Plans (ID, Name, Description)"]
+    df_unique_categories = df_plan.drop_duplicates(subset=[plan_id])
+    prompt_lines = ["## Available Plans"]
     
     for _, row in df_unique_categories.iterrows():
-        keyword = row['keyword']
-        prompt_lines.append(f"  ID: {row['id_plan']}")
-        prompt_lines.append(f"   Plan Name: {row['PlanName']}")
+        keyword = row[plan_keywords]
+        prompt_lines.append(f"  ID: {row[plan_id]}")
+        prompt_lines.append(f"   Plan Name: {row[plan_name]}")
         # prompt_lines.append(f"   Description: {row['Course_description']}")
         # prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
@@ -42,15 +43,15 @@ def generate_llm_prompts(df_category):
     Returns:
         str: A formatted string listing categories for the LLM prompt.
     """
-    df_unique_categories = df_category.drop_duplicates(subset=['CategoryName_English'])
+    df_unique_categories = df_category.drop_duplicates(subset=[category_name_english])
     prompt_lines = ["## Available Categories (ID, Name, Description)"]
     
     for _, row in df_unique_categories.iterrows():
-        category_id_val = row['id_category']
-        eng_name = row['CategoryName_English']
-        korean_name = row['CategoryName']
-        description = row['concatenated_descriptions']
-        keyword = row['keyword']
+        category_id_val = row[category_id]
+        eng_name = row[category_name_english]
+        korean_name = row[category_name]
+        # description = row[category_description]
+        keyword = row[category_keywords]
         
         prompt_lines.append(f"   ID: {category_id_val}")
         prompt_lines.append(f"   Category Name: {eng_name} / {korean_name}")
@@ -70,15 +71,15 @@ def generate_category_info_only(df_category):
     Returns:
         str: A formatted string listing categories for the LLM prompt.
     """
-    df_unique_categories = df_category.drop_duplicates(subset=['CategoryName_English'])
-    prompt_lines = ["## Available Categories (ID, Name, Description)"]
+    df_unique_categories = df_category.drop_duplicates(subset=[category_name_english])
+    prompt_lines = ["## Available Categories"]
     
     for _, row in df_unique_categories.iterrows():
-        category_id_val = row['id_category']
-        eng_name = row['CategoryName_English']
-        korean_name = row['CategoryName']
-        description = row['concatenated_descriptions']
-        keyword = row['keyword']
+        category_id_val = row[category_id]
+        eng_name = row[category_name_english]
+        korean_name = row[category_name]
+        # description = row[category_description]
+        keyword = row[category_keywords]
         
         prompt_lines.append(f"   ID: {category_id_val}")
         prompt_lines.append(f"   Category Name: {eng_name} / {korean_name}")
@@ -179,9 +180,9 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
     global role
     cols_examples = [col for col in i_df_plans.columns if 'example_' in col]
     persona = i_persona
-    plan_name = i_df_plans['PlanName'].iloc[0]
-    keyword = i_df_plans['keyword'].iloc[0]
-    description = i_df_plans['Course_description'].iloc[0]
+    plan_name = i_df_plans[plan_name].iloc[0]
+    keyword = i_df_plans[category_keywords].iloc[0]
+    description = i_df_plans[category_description].iloc[0]
     example_list = extract_examples_from_plan(i_df_plans, cols_examples)
     examples = [f"- {example}" for example in example_list]
     examples = "\n".join(examples)
@@ -358,7 +359,8 @@ def get_category_prompt(prompt_category: str,
 {evaluation_results_placeholder}
 
 ## 3. Category Information (선택 가능한 카테고리 목록)
-- 아래 목록에서 개선이 필요하다고 판단되는 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 설명을 주의 깊게 살펴보세요.
+- 아래 목록에서 개선이 필요하다고 판단되는 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 관련 키워드를 주의 깊게 살펴보고, 높은 우선순위부터 차례대로 선택해 주세요.
+- 만약 모든 항목의 점수가 높은 경우에는, category id: 1 "발달_단계_연령_중심" 을 우선 추천하고, 적절한 이유를 설명해 주세요.
 {prompt_category}
 
 # Output Format
@@ -366,7 +368,7 @@ def get_category_prompt(prompt_category: str,
 - **반드시** 아래 명시된 **JSON 형식**으로만 응답해야 합니다. 다른 텍스트는 절대 포함하지 마세요.
 - 최상위 키는 `"selected_categories"` (JSON 배열)와 `"overall_reason"` (문자열) 이어야 합니다.
 - `"selected_categories"` 배열 안에는 선택된 각 카테고리에 대한 **JSON 객체**가 포함됩니다.
-- 각 카테고리 객체는 반드시 `"id"` (카테고리 정보에 명시된 ID), `"name"` (카테고리 이름), `"priority"` (숫자 1-3, 1이 가장 시급), `"reason"` (선정 이유, **반드시 대화 내용과 평가 결과 내용 모두 인용**) 키를 가져야 합니다.
+- 각 카테고리 객체는 반드시 `"id"` (카테고리 정보에 명시된 ID), `"name"` (카테고리 이름), `"reason"` (선정 이유, **반드시 대화 내용과 평가 결과 내용 모두 인용**) 키를 가져야 합니다.
 - 배열 내 객체와 객체 사이에는 반드시 쉼표(,)를 사용하세요 (마지막 객체 제외).
 - 모든 키와 문자열 값은 **큰따옴표("")**로 감싸야 합니다.
 
@@ -374,8 +376,8 @@ def get_category_prompt(prompt_category: str,
 ```json
 {{
   "selected_categories": [
-    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1", "priority": 1, "reason": "선정 이유 1 (대화 중 '...' 발언과 평가 결과 항목 X의 내용 '...'을 볼 때 시급히 개선 필요)"}},
-    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2", "priority": 2, "reason": "선정 이유 2 (대화 중 '...' 상황과 평가 결과 항목 Y의 내용 '...' 관련하여 개선 필요)"}}
+    {{"id": "선택된_카테고리_ID_1", "name": "선택된_카테고리_이름_1",  "reason": "선정 이유 1 (대화 중 '...' 발언과 평가 결과 항목 X의 내용 '...'을 볼 때 시급히 개선 필요)"}},
+    {{"id": "선택된_카테고리_ID_2", "name": "선택된_카테고리_이름_2",  "reason": "선정 이유 2 (대화 중 '...' 상황과 평가 결과 항목 Y의 내용 '...' 관련하여 개선 필요)"}}
   ],
   "overall_reason": "종합적인 선정 이유 요약 (예: 평가 결과를 종합할 때 ID 1과 ID 2 카테고리 개선이 가장 중요하다고 판단됨)"
 }}
@@ -394,12 +396,11 @@ def get_category_prompt(prompt_category: str,
         prompt_category=prompt_category
     )
 
-def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
+def get_plan_prompt(scoring_results, relevant_plans_info: str):
     """Generate prompt for specific coaching plan recommendation (f-string 제거 및 포맷팅 개선)"""
     # 딕셔너리를 읽기 좋은 JSON 문자열로 포맷팅
     scoring_str = json.dumps(scoring_results, ensure_ascii=False, indent=2)
-    categories_str = json.dumps(categories, ensure_ascii=False, indent=2)
-    
+
     # 표준 문자열 사용 (f-string 아님)
     prompt_template = """
 {role}
@@ -408,9 +409,6 @@ def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
 # Context
 ## Conversation Scoring
 {scoring_results_str}
-
-## Selected Categories
-{categories_str}
 
 ## Relevant Plans Information
 {relevant_plans_info}
@@ -426,7 +424,6 @@ def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
   }},
   "recommended_plans": [
     {{
-      "category": "string", # 관련 카테고리 이름
       "plan_id": "string", # 추천 플랜 ID
       "plan_name": "string", # 추천 플랜명
       "reason": "string", # 추천 이유 (대화/평가 근거)
@@ -449,7 +446,6 @@ def get_plan_prompt(categories, scoring_results, relevant_plans_info: str):
     prompt = prompt_template.format(
         role=role,
         scoring_results_str=scoring_str,
-        categories_str=categories_str,
         relevant_plans_info=relevant_plans_info
     )
     return prompt
