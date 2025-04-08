@@ -63,7 +63,8 @@ cols_tags = ['Course_description', 'parenting_worries', 'parenting_env', 'tag']
 cols_name = ['CategoryName', 'CategoryName_English', 'PlanName', 'PlanName_English']
 cols_id = ['id_category', 'id_plan']
 cols_examples = ['example_'+str(i+1) for i in range(5)]
-
+cols_month = ['MinMonth', 'MaxMonth']
+cols_category = ['id_category', 'CategoryName','CategoryName_English', 'keyword', 'concatenated_descriptions'] + cols_month
 import pandas as pd
 from collections import OrderedDict
 
@@ -150,7 +151,7 @@ def mappping_category(df, output_path, is_print=False):
     df['CategoryName_English'] = df['CategoryName'].map(level2_to_english)
     df['PlanName_English'] = df['PlanName'].map(level3_to_english)
 
-    df=df[cols_id+cols_name+cols_examples+cols_tags]
+    df=df[cols_id+cols_name+cols_examples+cols_tags+cols_month]
 
     if is_print:
         for i in df.groupby(['CategoryName']):
@@ -233,13 +234,16 @@ def main():
  
     df = mappping_category(df=df, output_path = output_path, is_print=True)
     # Apply the processing function
+    
     column_pairs = [ ('id_category', 'CategoryName_English'), ('id_plan', 'PlanName_English')]
     result = extract_unique_index_name_pairs(df, column_pairs=column_pairs)
     print_keys_and_values(result)
-    dict_category = result['pairs']['id_category_CategoryName_English']
-    print(dict_category)
+    # dict_category = result['pairs']['id_category_CategoryName_English']
+    # print(dict_category)
+
     
-    df_category = process_dataframe(df, columns_to_keep = ['id_category', 'CategoryName','CategoryName_English', 'keyword', 'concatenated_descriptions'])
+    
+    df_category = process_dataframe(df, columns_to_keep = cols_category + cols_month)
     print(df_category.head())
     category_path = 'preped_category.csv'
     plan_path = 'preped_plan.csv'

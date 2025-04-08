@@ -79,7 +79,7 @@ class CSVProcessor:
         row = self.df.iloc[index]
         
         # 기본 페르소나 정보
-        persona_data = {"persona": row["페르소나"], "priority_interests": []}
+        persona_data = {"persona": [row["페르소나"], row["아이 연령"]], "priority_interests": []}
         
         # 우선순위 관심사 처리
         for i in range(1, 7):
