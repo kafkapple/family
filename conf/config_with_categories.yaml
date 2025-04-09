@@ -37,19 +37,19 @@ data:
 prompt:
   top_k: 3
   dialogue:
-    is_survey: false
+    is_survey: true
     is_keywords: true
-    is_example: false
+    is_example: true
     is_description: false
   scoring:
-    detailed_criteria: true
+    detailed_criteria: false
   category:
-    enabled: true
+    enabled: false
     is_survey: false
 
   plan:
     is_survey: false
-    is_dialogue: false
+    is_dialogue: true
     is_keywords: true
     is_example: false
     is_description: false

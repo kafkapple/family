@@ -139,11 +139,8 @@ def main(cfg: AppConfig) -> None:
                 scoring_criteria_list.append({'id': item_id, **item_data})
     scoring_index_to_id, scoring_id_to_index = create_scoring_mappings(scoring_criteria_list)
     # --- 매핑 생성 완료 ---
-
     # prompt_category_info = generate_llm_prompts(df) # 함수명 변경 고려 (이제 프롬프트 전체가 아님)
-    
     output_path = cwd / Path("outputs") / Path(name_param) 
-    
     
     output_scoring_path = output_path / Path("3_scoring")
     output_category_path = output_path / Path("4_category")
@@ -172,7 +169,6 @@ def main(cfg: AppConfig) -> None:
     
     from src.prep import load_and_parse_json_data
     data_target_path = cwd / Path("data") / Path("target")
-
     # for i, json_file in tqdm(enumerate(json_files)):
     
     for i in tqdm(df_survey['일련번호']):
