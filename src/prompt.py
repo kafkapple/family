@@ -398,7 +398,8 @@ def get_category_prompt(prompt_category: str,
     prompt_template = """
 {role}
 # Instruction
-- **매우 중요:** 당신의 임무는 아래 제공된 [Child Age], [Survey Information], [Evaluation Results], [Category Information] **정보를 종합적으로 분석**하여, 육아 과정에 개선 및 보완이 필요한 카테고리를 **1개 이상 선정**하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
+- **매우 중요:** 당신의 임무는 아래 제공된 [Child Age], [Survey Information], [Evaluation Results], [Category Information] **정보를 종합적으로 분석**하여, 육아 과정에 개선 및 보완이 필요한 카테고리를 3개 이상 선정하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
+- 관련이 매우 낮은 카테고리는 제외하되, 가능한 많은 카테고리를 선택해 높은 관련성 및 우선순위 순서대로 나열해 주세요.
 
 # Context
 [Child Age]
@@ -462,7 +463,7 @@ def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, d
     prompt_template = """
 {role}
 # Instruction
-- 아래 정보들을 종합적으로 고려하여, 부모에게 권하고 싶은 플랜들을 최대한 많이, 우선 순위대로 추천하고 그 이유와 기대 효과를 설명해주세요.
+- 아래 정보들을 종합적으로 고려하여, 부모에게 권하고 싶은 플랜들을 3개 이상, 가능한 많이 우선 순위대로 추천하고, 그 이유와 기대 효과를 설명해주세요.
 - 반드시'[Relevant Plans Information]'에 제시된 플랜들 중에서만 추천해 주세요.
 - 추천 이유(`reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
 - 기대 효과(`expected_effect`)는 해당 플랜을 통해 부모의 어떤 점이 개선될 수 있는지 명확하게 기술해야 합니다.

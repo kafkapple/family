@@ -16,6 +16,7 @@ from src.prep_map_survey import FamilyPersona
 from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only, prep_survey_info
 from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
 from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file
+from src.evaluation import call_metric
 import shutil
 #load_and_parse_json_data, levenshtein_distance,save_dialogue_to_file
 # .env 파일에서 환경 변수 불러오기
@@ -161,7 +162,7 @@ def main(cfg: AppConfig) -> None:
     else:
         print("LLM 클라이언트 초기화 완료.")
 
-    csv_path = cwd / "data" / "VirtualSurvey.csv"
+    csv_path = cwd / "data" / "VirtualSurvey - VirtualSurvey.csv"
     family = FamilyPersona(csv_path=csv_path)
     # family = FamilyPersona(csv_path=csv_path)
     df_scores = pd.DataFrame()
@@ -383,8 +384,10 @@ def main(cfg: AppConfig) -> None:
 
         df_scores = pd.concat([df_scores, df_i], ignore_index=True)
         
-
-    df_scores.to_csv(output_path / Path(f"survey_with_scoring_{name_param}.csv"), encoding='utf-8-sig', index=True)
+    prediction_path = output_path / Path(f"survey_with_scoring_{name_param}.csv")
+    evaluation_path = output_path / Path(f"evaluation_metric_{name_param}.csv")
+    df_scores.to_csv(prediction_path, encoding='utf-8-sig', index=True)
+    call_metric(prediction_path, evaluation_path, name_param)
     
 if __name__ == "__main__":
     main()

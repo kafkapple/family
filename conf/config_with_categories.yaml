@@ -1,7 +1,7 @@
 # conf/config_with_categories.yaml
 yaml_path: ${hydra:runtime.cwd}/plans.yaml
 llm_provider: 'ollama'
-model_name: gemma3:12b #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
+model_name: gemma3 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
 #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf:latest     0f5688cf9681    9.4 GB    4 weeks ago    
 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF:latest 
 
@@ -21,11 +21,11 @@ model:
   type: ${llm_provider}
   name: ${model_name}
   parameters:
-    temperature: 0.2
+    temperature: 0.1
     max_tokens: 3000
     top_p: 0.8 # 0.9
     top_k: 10 #30
-    repeat_penalty: 1.6 # 
+    repeat_penalty: 1.8 # 
     frequency_penalty: 0.4
     presence_penalty: 0.2 #0.3
     timeout: 30
@@ -35,7 +35,7 @@ data:
   exclude_plans: intro #basic # intro 가 기본
 
 prompt:
-  top_k: 3
+  top_k: 6
   dialogue:
     is_survey: true
     is_keywords: true
@@ -44,12 +44,11 @@ prompt:
   scoring:
     detailed_criteria: false
   category:
-    enabled: false
-    is_survey: false
-
+    enabled: true
+    is_survey: true
   plan:
-    is_survey: false
-    is_dialogue: true
+    is_survey: true
+    is_dialogue: false
     is_keywords: true
     is_example: false
     is_description: false
