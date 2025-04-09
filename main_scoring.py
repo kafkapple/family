@@ -13,7 +13,7 @@ from src.llm_client import create_llm_client
 from src.llm_interface import get_llm_response
 from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
 from src.prep_map_survey import FamilyPersona
-from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only
+from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only, prep_survey_info
 from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
 from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file
 import shutil
@@ -114,8 +114,18 @@ def main(cfg: AppConfig) -> None:
     data_prep_path = cwd / Path('data/prep') 
     data_path = data_prep_path / Path('preped_category.csv')
     df = pd.read_csv(data_path, encoding='utf-8-sig')
+    df_category = df
     data_plan_path = data_prep_path / Path('preped_plan.csv') 
     df_plan = pd.read_csv(data_plan_path, encoding='utf-8-sig')
+
+    if cfg.data.exclude_plans == 'intro':
+        print(f"\n===================intro 플랜 제외===================")
+        df_plan = df_plan[df_plan[category_name_english] != 'intro']
+        df_category = df_category[df_category[category_name_english] != 'intro']
+    elif cfg.data.exclude_plans == 'basic':
+        print(f"\n===================basic 플랜 제외===================")
+        df_plan = df_plan[df_plan[plan_id] >2]
+        df_category = df_category[df_category[category_id] >2]
     #map_plan = df_plan[[plan_id, plan_name_english]]
     # --- 매핑 생성 (함수 호출, 변수명 변경) --- 
     category_id_to_name, category_name_to_id = create_category_id_mappings(df)
@@ -168,10 +178,12 @@ def main(cfg: AppConfig) -> None:
     for i in tqdm(df_survey['일련번호']):
         i_df= df_survey.iloc[i,:]
         i_family = family.get_persona_data(i)
+        i_survey_info = prep_survey_info(i_family, top_k=cfg.prompt.top_k)
         child_age = i_df['아이 연령']
 
         df_category = df[df['min_month'] <= child_age]
         df_category = df_category[df_category['max_month'] >= child_age]
+
         print(f"연령에 적합한 Category id 목록: {df_category[category_id]}")
         category_info_only = generate_category_info_only(df_category)
     #for i in tqdm(range(family.get_persona_count())):
@@ -254,63 +266,76 @@ def main(cfg: AppConfig) -> None:
         # --- 스코어링 로직 끝 ---
         print("\n" + "="*50 + "\n") # 각 plan 처리 후 구분선 출력
         
-        prompt = get_category_prompt(prompt_category=category_info_only,
-                scoring_results=scoring_data, # Pass the original dictionary
-                child_age=child_age,
-            )
-        prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_Category_{name_param}_prompt.txt")
-        save_llm_prompts_to_txt(prompt, prompt_category_path)
-        # Step 4의 예상 최상위 키 수정: overall_reason 추가
-        expected_category_keys = ["selected_categories", "overall_reason"] 
-        category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_category_keys)
-        
-        # category_data가 None이거나 필요한 키가 없는 경우 처리
-        if not category_data or "selected_categories" not in category_data or not isinstance(category_data["selected_categories"], list):
-                print(f"Family {i}: Step 4 카테고리 추천 데이터 처리 실패. 다음 가족으로 넘어갑니다.")
-                print(f"LLM 응답 (category_data): {category_data}")
+        if cfg.prompt.category.enabled:
+            prompt = get_category_prompt(prompt_category=category_info_only,
+                    scoring_results=scoring_data, # Pass the original dictionary
+                    child_age=child_age,
+                    survey_info=i_survey_info
+                )
+            prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_4_Category_{name_param}_prompt.txt")
+            save_llm_prompts_to_txt(prompt, prompt_category_path)
+            # Step 4의 예상 최상위 키 수정: overall_reason 추가
+            expected_category_keys = ["selected_categories", "overall_reason"] 
+            category_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_category_keys)
+            
+            # category_data가 None이거나 필요한 키가 없는 경우 처리
+            if not category_data or "selected_categories" not in category_data or not isinstance(category_data["selected_categories"], list):
+                    print(f"Family {i}: Step 4 카테고리 추천 데이터 처리 실패. 다음 가족으로 넘어갑니다.")
+                    print(f"LLM 응답 (category_data): {category_data}")
+                    continue
+
+            output_file = os.path.join(
+                                output_category_path,
+                                f"{index_persona}_Step_4_Category_{name_param}.json"
+                            )
+            save_response_to_file(output_file, category_data, i)
+            print(f"카테고리 결과 저장됨: {output_file}")
+
+            ####### 플랜 추천 로직 시작 #######
+            # category_ids 생성 시 오류 처리 강화
+            category_ids = []
+            for item in category_data.get("selected_categories", []):
+                cat_id_str = item.get("id")
+                if cat_id_str is not None and isinstance(cat_id_str, (str, int)):
+                    try:
+                        cat_id_int = int(cat_id_str) # 정수 변환 시도
+                        # 변환된 ID가 유효한 카테고리 ID인지 추가 확인 (선택 사항)
+                        if cat_id_int in category_id_to_name:
+                                category_ids.append(cat_id_int)
+                        else:
+                                print(f"경고: 추천된 카테고리 ID '{cat_id_int}'가 유효하지 않아 무시합니다.")
+                    except ValueError:
+                        print(f"경고: 추천된 카테고리 ID '{cat_id_str}'를 정수로 변환할 수 없어 무시합니다.")
+                else:
+                        print(f"경고: 유효하지 않은 카테고리 ID 항목 발견: {item}")
+            
+            if not category_ids:
+                print(f"Family {i}: 유효한 추천 카테고리 ID를 찾을 수 없습니다. 플랜 추천을 건너뛰니다.")
                 continue
+            # if len(category_ids) >3:
+            #     category_ids = category_ids[:3]
 
-        output_file = os.path.join(
-                            output_category_path,
-                            f"{index_persona}_Step_4_Category_{name_param}.json"
-                        )
-        save_response_to_file(output_file, category_data, i)
-        print(f"카테고리 결과 저장됨: {output_file}")
+            print(f"추천된 유효 카테고리 ID 목록: {category_ids}")
+            print("="*50)
+            plans_info = df_plan[df_plan[category_id].isin(category_ids)]
+            category_name = [item.get('name') for item in category_data.get('selected_categories', [])]
+            category_reason = [item.get('reason') for item in category_data.get('selected_categories', [])]
+            category_overall_reason = category_data.get('overall_reason')
+            
+        else:
+            plans_info = df_plan
+            category_ids = []
+            category_name = []
+            category_reason = []
+            category_overall_reason = []
 
-        ####### 플랜 추천 로직 시작 #######
-        # category_ids 생성 시 오류 처리 강화
-        category_ids = []
-        for item in category_data.get("selected_categories", []):
-            cat_id_str = item.get("id")
-            if cat_id_str is not None and isinstance(cat_id_str, (str, int)):
-                try:
-                    cat_id_int = int(cat_id_str) # 정수 변환 시도
-                    # 변환된 ID가 유효한 카테고리 ID인지 추가 확인 (선택 사항)
-                    if cat_id_int in category_id_to_name:
-                            category_ids.append(cat_id_int)
-                    else:
-                            print(f"경고: 추천된 카테고리 ID '{cat_id_int}'가 유효하지 않아 무시합니다.")
-                except ValueError:
-                    print(f"경고: 추천된 카테고리 ID '{cat_id_str}'를 정수로 변환할 수 없어 무시합니다.")
-            else:
-                    print(f"경고: 유효하지 않은 카테고리 ID 항목 발견: {item}")
-        
-        if not category_ids:
-            print(f"Family {i}: 유효한 추천 카테고리 ID를 찾을 수 없습니다. 플랜 추천을 건너뛰니다.")
-            continue
-        # if len(category_ids) >3:
-        #     category_ids = category_ids[:3]
-
-        print(f"추천된 유효 카테고리 ID 목록: {category_ids}")
-        print("="*50)
-        plans_info = df_plan[df_plan[category_id].isin(category_ids)]
         print(f"추천된 plan id 목록: {plans_info[plan_id]}")
         plans_info = plans_info[plans_info['min_month'] <= child_age]
         plans_info = plans_info[plans_info['max_month'] >= child_age]
         print(f"연령에 적합한 plan id 목록: {plans_info[plan_id]}")
-        relevant_plans_info = gen_plan_info(plans_info)
+        relevant_plans_info = gen_plan_info(plans_info, is_keywords=cfg.prompt.plan.is_keywords, is_example=cfg.prompt.plan.is_example, is_description=cfg.prompt.plan.is_description)
         prompt_plan_path = os.path.join(prompt_path, f"{index_persona}_Step_5_Plan_{name_param}_prompt.txt")
-        prompt = get_plan_prompt(scoring_results=scoring_data, relevant_plans_info=relevant_plans_info, child_age=child_age, dialogue=formatted_dialogue, is_dialogue=cfg.prompt.plan.is_dialogue)
+        prompt = get_plan_prompt(scoring_results=scoring_data, relevant_plans_info=relevant_plans_info, child_age=child_age, dialogue=formatted_dialogue, survey_info=i_survey_info, is_dialogue=cfg.prompt.plan.is_dialogue)
         save_llm_prompts_to_txt(prompt, prompt_plan_path)
         plan_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=['conversation_analysis', 'recommended_plans'])
         output_file = os.path.join(
@@ -328,9 +353,6 @@ def main(cfg: AppConfig) -> None:
         
         # 카테고리 관련 정보 추출
         #category_id = [item.get('id') for item in category_data.get('selected_categories', [])]
-        category_name = [item.get('name') for item in category_data.get('selected_categories', [])]
-        category_reason = [item.get('reason') for item in category_data.get('selected_categories', [])]
-        category_overall_reason = category_data.get('overall_reason')
         
         # 플랜 관련 정보 추출
         recommended_plans = plan_data.get("recommended_plans", []) if plan_data else [] 

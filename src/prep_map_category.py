@@ -300,6 +300,7 @@ def main():
     df = prep_metadata(df=df, output_path = output_path, is_print=True)
 # For recommendation
     #df = df[df[category_id]!=0] # remove 입문 플랜
+    df = df[df[plan_id]>1] # remove 체험판, 첫걸음
     plan_path = data_prep_path / Path('preped_plan.csv')
     df.to_csv(plan_path, index=False, encoding='utf-8-sig')
     # dict_category = result['pairs']['id_category_CategoryName_English']

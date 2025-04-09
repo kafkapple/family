@@ -11,7 +11,7 @@ role = """
 - 당신 덕분에 많은 가족들은 육아 과정에서 더 나은 방법을 찾아가고, 더 나은 관계를 유지할 수 있습니다.
 """
 
-def gen_plan_info(df_plan):
+def gen_plan_info(df_plan, is_keywords: bool = False, is_example: bool = False, is_description: bool = False):
     """
     Generates LLM prompts listing categories with their IDs and descriptions.
     (카테고리 목록을 ID, 이름, 설명과 함께 명확하게 생성하도록 개선)
@@ -29,8 +29,14 @@ def gen_plan_info(df_plan):
         keyword = row[plan_keywords]
         prompt_lines.append(f"  ID: {row[plan_id]}")
         prompt_lines.append(f"   Plan Name: {row[plan_name]}")
-        # prompt_lines.append(f"   Description: {row['Course_description']}")
-        prompt_lines.append(f"   Keywords: {keyword}")
+        if is_description:
+            prompt_lines.append(f"   Description: {row[plan_description]}")
+        if is_example:
+            cols_examples = ['example_'+str(i+1) for i in range(5)]
+            examples = [row[col] for col in cols_examples]
+            prompt_lines.append(f"   Examples: {examples}")
+        if is_keywords:
+            prompt_lines.append(f"   Keywords: {keyword}")
         prompt_lines.append("")
 
     return "\n".join(prompt_lines)
@@ -91,14 +97,17 @@ def generate_category_info_only(df_category):
 
     return "\n".join(prompt_lines)
 
-
-def generate_category_from_survey(context, category_info, child_age, top_k=3) -> str:
-    persona = context.get('persona')
+def prep_survey_info(context,  top_k=3) -> str:
     priority_interests = context.get('priority_interests')
     priority_interests = priority_interests[:top_k]
     processed = ""
     for i in priority_interests:
         processed += f"- 우선순위 {i.get('priority')}. 관심 주제: {i.get('category_korean')}\\n- 키워드: {', '.join(i.get('keywords'))}\\n"
+    return processed
+
+def generate_category_from_survey(context, category_info, child_age, top_k=3) -> str:
+    persona = context.get('persona')
+    processed = prep_survey_info(context, top_k)
     
     prompt_template = """
 {role}
@@ -180,17 +189,26 @@ def extract_examples_from_plan(df_plan_row, cols_examples):
                 examples.append(clean_example)
     return examples
 
-def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, child_persona, parent_persona) -> str:
+def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_persona, parent_persona, is_keywords: bool = False, is_description: bool = False, is_example: bool = False) -> str:
     """심리 상담사 프롬프트를 생성합니다. (카테고리 이름을 직접 받도록 수정)"""
     global role
     cols_examples = [col for col in i_df_plans.columns if 'example_' in col]
     persona = i_persona
-    plan_name = i_df_plans[plan_name].iloc[0]
-    keyword = i_df_plans[plan_keywords].iloc[0]
-    description = i_df_plans[plan_description].iloc[0]
-    example_list = extract_examples_from_plan(i_df_plans, cols_examples)
-    examples = [f"- {example}" for example in example_list]
-    examples = "\n".join(examples)
+    i_plan_name = i_df_plans[plan_name].iloc[0]
+    if is_keywords:
+        i_keyword = i_df_plans[plan_keywords].iloc[0]
+    else:
+        i_keyword = ""
+    if is_description:
+        i_description = i_df_plans[plan_description].iloc[0]
+    else:
+        i_description = ""
+    if is_example:
+        example_list = extract_examples_from_plan(i_df_plans, cols_examples)
+        examples = [f"- {example}" for example in example_list]
+        examples = "\n".join(examples)
+    else:
+        examples = ""
 
     print(f"Examples:\n{examples}")
   
@@ -221,10 +239,10 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
 {parent_persona}
 
 ## 코칭 플랜
-- 카테고리: {category_name} 
-- 플랜: {plan_name}
-- 키워드: {keyword}
-- 설명: {description}
+- 카테고리: {i_category_name} 
+- 플랜: {i_plan_name}
+- 키워드: {i_keyword}
+- 설명: {i_description}
 
 ## examples
 {examples}
@@ -238,6 +256,7 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
 {{
   "category": "string", // 카테고리 이름
   "plan": "string", // 플랜 이름
+  "age": "string" // 아이 연령
   "explanation": "string", // 대화 생성 전략 및 근거 요약
   "dialogue": [
     {{
@@ -252,10 +271,10 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
     prompt = prompt_template.format(
         role=role,
         persona=persona, 
-        category_name=category_name, # 전달받은 실제 카테고리 이름 사용
-        plan_name=plan_name, 
-        keyword=keyword, 
-        description=description,
+        i_category_name=i_category_name, # 전달받은 실제 카테고리 이름 사용
+        i_plan_name=i_plan_name, 
+        i_keyword=i_keyword, 
+        i_description=i_description,
         examples=examples,
         child_persona=child_persona,
         parent_persona=parent_persona
@@ -366,6 +385,7 @@ def format_scoring_results(scoring_results: Dict[str, Any]) -> str:
     return formatted_evaluation
 def get_category_prompt(prompt_category: str,
                         child_age: str,
+                        survey_info: str,
                         scoring_results: Dict[str, Any]):
     """Generate prompt for coaching category recommendation (지시 명확화, explanation 타입 검사 추가)"""
     # Format evaluation results correctly from the expected structure
@@ -378,11 +398,14 @@ def get_category_prompt(prompt_category: str,
     prompt_template = """
 {role}
 # Instruction
-- **매우 중요:** 당신의 임무는 아래 제공된 [Child Age], [Evaluation Results], [Category Information] **정보를 종합적으로 분석**하여, 육아 과정에 개선 및 보완이 필요한 카테고리를 **1개 이상 선정**하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
+- **매우 중요:** 당신의 임무는 아래 제공된 [Child Age], [Survey Information], [Evaluation Results], [Category Information] **정보를 종합적으로 분석**하여, 육아 과정에 개선 및 보완이 필요한 카테고리를 **1개 이상 선정**하고, 그 결과를 **반드시 지정된 [Output Format]에 따라 JSON 형식으로 출력**하는 것입니다.
 
 # Context
 [Child Age]
 - 아이 연령: {child_age} 개월
+
+[Survey Information]
+{survey_info}
 
 [Evaluation Results]
 - 다음은 육아 과정 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고해 주세요.
@@ -423,10 +446,11 @@ def get_category_prompt(prompt_category: str,
         role=role,
         child_age=child_age,
         evaluation_results_placeholder=formatted_evaluation,
-        prompt_category=prompt_category
+        prompt_category=prompt_category,
+        survey_info=survey_info
     )
 
-def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, dialogue: str, is_dialogue: bool = False):
+def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, dialogue: str, survey_info: str, is_dialogue: bool = False):
     """Generate prompt for specific coaching plan recommendation (f-string 제거 및 포맷팅 개선)"""
     # 딕셔너리를 읽기 좋은 JSON 문자열로 포맷팅
     formatted_scoring_results = format_scoring_results(scoring_results)
@@ -442,11 +466,16 @@ def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, d
 - 반드시'[Relevant Plans Information]'에 제시된 플랜들 중에서만 추천해 주세요.
 - 추천 이유(`reason`)는 반드시 대화 내용이나 평가 결과를 근거로 구체적으로 작성해야 합니다.
 - 기대 효과(`expected_effect`)는 해당 플랜을 통해 부모의 어떤 점이 개선될 수 있는지 명확하게 기술해야 합니다.
+- 대화에 직접 드러나는 인물 및 내용을 참고하여 추천 플랜을 선택해야 합니다.
+- 대화에 드러나지 않은 다른 가족에 대한 부분은 함부로 짐작하지 마세요.
 
 # Context
 [Child Age]
 - 아이 연령: {child_age} 개월
 - [Dialogue] 에 언급되는 나이는 무시해 주세요.
+
+[Survey Information]
+{survey_info}
 
 [Dialouge Scoring]
 {formatted_scoring_results}
@@ -488,7 +517,8 @@ def get_plan_prompt(scoring_results, relevant_plans_info: str, child_age: str, d
         formatted_scoring_results=formatted_scoring_results,
         relevant_plans_info=relevant_plans_info,
         child_age=child_age,
-        context=context
+        context=context,
+        survey_info=survey_info
     )
     return prompt
 

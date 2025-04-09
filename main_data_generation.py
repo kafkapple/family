@@ -14,8 +14,8 @@ from src.llm_client import create_llm_client
 from src.llm_interface import get_llm_response
 from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
 from src.prep_map_survey import FamilyPersona
-from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, gen_prompt_category_info, generate_category_info_only, generate_category_from_survey, create_counselor_family_prompt
-from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
+from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, gen_prompt_category_info, generate_category_info_only, generate_category_from_survey, gen_dialogue_prompt
+from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_id
 from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file, save_dialogue_to_file
 
 import json
@@ -194,11 +194,6 @@ def main(cfg: AppConfig) -> None:
             continue 
         
         selected_category_id = family_data.get("category_id") # 키 이름 변경: category_index -> category_id
-        # family_persona = family_data.get("persona") # 수정 전
-        # child_persona = family_persona.get("child") # 수정 전
-        # parent_persona = family_persona.get("parent") # 수정 전
-        # child_age = child_persona.get("age") # 수정 전
-        
         # 페르소나 정보 가져오기 (NoneType 오류 방지)
         family_persona = family_data.get("persona")
         if family_persona is None or not isinstance(family_persona, dict):
@@ -228,9 +223,9 @@ def main(cfg: AppConfig) -> None:
             continue 
             
         # 유효한 ID를 사용하여 실제 카테고리 이름(문자열) 가져오기
-        category_name = category_id_to_name[selected_category_id] 
+        i_category_name = category_id_to_name[selected_category_id] 
         print(f"====================Family Data (ID: {selected_category_id})==================={family_data}")
-        print(f"\n=== 카테고리: {category_name} (ID: {selected_category_id}) ===")
+        print(f"\n=== 카테고리: {i_category_name} (ID: {selected_category_id}) ===")
         
         # 결과 저장 (정상 처리 시)
         output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{selected_category_id}_{name_param}.json")
@@ -238,7 +233,7 @@ def main(cfg: AppConfig) -> None:
         # prep_map_category 임포트 위치 변경 (필요 시점)
         try:
             # df_plan 필터링 시 category_id 대신 category_name 사용
-            df_plans = df_plan[df_plan[category_name_english]==category_name]
+            df_plans = df_plan[df_plan[category_name_english]==i_category_name]
         
             df_plans = df_plans[df_plans['min_month'] <= child_age]
             df_plans = df_plans[df_plans['max_month'] >= child_age]
@@ -252,12 +247,12 @@ def main(cfg: AppConfig) -> None:
                 index_plan = int(map_plan[map_plan[plan_name_english] == plan][plan_id].values[0])
 
                 index_plan_dialogue = f"{index_persona}_Step_2_dialogue_Cat_{selected_category_id}_Plan_{index_plan}_{name_param}"
-                index_plan_scoring = f"{index_persona}_Step_3_scoring_Cat_{selected_category_id}_Plan_{index_plan}_{name_param}"
+            
                 # 해당 플랜의 데이터 필터링
                 i_df_plans = df_plans[df_plans[plan_name_english] == plan]
            
                 # 심리 상담사 프롬프트 생성 (category_id는 이미 문자열로 변환됨)
-                prompt, examples = create_counselor_family_prompt(i_persona, category_name, i_df_plans, child_persona, parent_persona)
+                prompt, examples = gen_dialogue_prompt(i_persona, i_category_name, i_df_plans, child_persona, parent_persona, is_keywords=cfg.prompt.dialogue.is_keywords, is_description=cfg.prompt.dialogue.is_description, is_example=cfg.prompt.dialogue.is_example)
                 prompt_dialouge_path = os.path.join(prompt_path, f"{index_plan_dialogue}_prompt.txt")
                 save_llm_prompts_to_txt(prompt, prompt_dialouge_path)
                 
@@ -273,7 +268,7 @@ def main(cfg: AppConfig) -> None:
                     
                     
                     output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}.json")
-                    save_dialogue_to_file(output_file, dialogue_data, category_name, plan, examples)
+                    save_dialogue_to_file(output_file, dialogue_data, i_category_name, plan, examples)
              
                     print(f"\n대화가 '{output_file}'에 저장되었습니다.")
                 else:
