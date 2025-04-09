@@ -115,8 +115,12 @@ def main(cfg: AppConfig) -> None:
     df = pd.read_csv(data_path, encoding='utf-8-sig')
     data_plan_path = data_prep_path / Path('preped_plan.csv') 
     df_plan = pd.read_csv(data_plan_path, encoding='utf-8-sig')
-    map_plan = df_plan[[plan_id, plan_name_english]]
+    #map_plan = df_plan[[plan_id, plan_name_english]]
     
+    
+    import shutil
+    
+
     # --- 매핑 생성 (함수 호출, 변수명 변경) --- 
     category_id_to_name, category_name_to_id = create_category_id_mappings(df)
     
@@ -132,17 +136,20 @@ def main(cfg: AppConfig) -> None:
 
     # prompt_category_info = generate_llm_prompts(df) # 함수명 변경 고려 (이제 프롬프트 전체가 아님)
     
-    output_path = cwd / Path("outputs") / Path(model_name) 
+    output_path = cwd / Path("outputs") / Path(name_param) 
     
-    output_scoring_path = cwd / Path("outputs") / Path(model_name) / Path("3_scoring")
-    output_category_path = cwd / Path("outputs") / Path(model_name) / Path("4_category")
-    output_final_path = cwd / Path("outputs") / Path(model_name) / Path("5_final_plan")
+    
+    output_scoring_path = output_path / Path("3_scoring")
+    output_category_path = output_path / Path("4_category")
+    output_final_path = output_path / Path("5_final_plan")
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(output_scoring_path, exist_ok=True)
     os.makedirs(output_category_path, exist_ok=True)
     os.makedirs(output_final_path, exist_ok=True)
-    prompt_path = cwd / Path("outputs") / Path(model_name) / Path("prompt")
+    prompt_path = output_path / Path("prompt")
     os.makedirs(prompt_path, exist_ok=True)
+    
+    shutil.copy(cwd / Path('conf') / Path('config_with_categories.yaml'), output_path)
     
     # LLM API를 사용하도록 설정
     llm_client = create_llm_client(cfg)
@@ -363,7 +370,7 @@ def main(cfg: AppConfig) -> None:
         df_scores = pd.concat([df_scores, df_i], ignore_index=True)
         
 
-    df_scores.to_csv(output_path / Path("survey_with_scoring.csv"), encoding='utf-8-sig', index=True)
+    df_scores.to_csv(output_path / Path(f"survey_with_scoring_{name_param}.csv"), encoding='utf-8-sig', index=True)
     
 if __name__ == "__main__":
     main()

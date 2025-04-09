@@ -386,7 +386,7 @@ def get_category_prompt(prompt_category: str,
 - 다음은 육아 과정 대화에 대한 평가 결과입니다. 각 항목의 점수(낮을수록 문제)와 설명을 참고해 주세요.
 {evaluation_results_placeholder}
 
-[ategory Information]
+[Category Information]
 - 반드시 아래 목록에서 카테고리를 선택해야 합니다. 각 카테고리의 ID, 이름, 관련 키워드를 주의 깊게 살펴보고, 높은 관련성, 우선순위부터 차례대로 선택해 주세요.
 - 만약 모든 항목의 점수가 높거나 특별한 추천 항목이 생각나지 않는 경우에는, category id: 1 "발달_단계_연령_중심" 을 우선 추천하고, 적절한 이유를 설명해 주세요.
 {prompt_category}

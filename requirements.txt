@@ -1,0 +1,10 @@
+hydra-core
+omegaconf
+python-dotenv
+tqdm
+pandas
+openai
+requests
+python-Levenshtein
+Jinja2
+langchain-ollama
