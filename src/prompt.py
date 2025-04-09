@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 import json
-from src.prep_map_category import category_name_english, category_name, category_id,  plan_name, plan_id, category_keywords, category_description, plan_keywords
+from src.prep_map_category import category_name_english, category_name, category_id,  plan_name, plan_id, category_keywords, category_description, plan_keywords, plan_description
 #theme_name_english, theme_name, theme_id, plan_name_english,
 
 # - 전문가 경험, 가족 페르소나, 도움이 될 수 있는 코칭 플랜 정보를 종합해 고려합니다.
@@ -35,7 +35,7 @@ def gen_plan_info(df_plan):
 
     return "\n".join(prompt_lines)
 
-def generate_llm_prompts(df_category):
+def gen_prompt_category_info(df_category):
     """
     Generates LLM prompts listing categories with their IDs and descriptions.
     (카테고리 목록을 ID, 이름, 설명과 함께 명확하게 생성하도록 개선)
@@ -92,7 +92,7 @@ def generate_category_info_only(df_category):
     return "\n".join(prompt_lines)
 
 
-def generate_category_from_survey(context, category_info, top_k=3) -> str:
+def generate_category_from_survey(context, category_info, child_age, top_k=3) -> str:
     persona = context.get('persona')
     priority_interests = context.get('priority_interests')
     priority_interests = priority_interests[:top_k]
@@ -109,9 +109,10 @@ def generate_category_from_survey(context, category_info, top_k=3) -> str:
 - 카테고리 목록([Available Categories])에 제공된 ID 중에서만 선택해야 합니다.
 - 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
 - **`explanation` 필드는 반드시 한국어로만 작성해야 합니다. 영어 단어나 문장을 사용하지 마세요.**
-
+- 아이 나이는 주어진 정보를 바탕으로, 각 나이에 맞는 언어를 구사해야 합니다.
 # Context
 ### Family Persona
+- 아이 나이: {child_age} 개월
 - {persona}
 ### Priority Interests
 - 관심사 카테고리 및 키워드는 우선 순위가 높은 것부터 나열되어 있습니다.
@@ -154,7 +155,8 @@ def generate_category_from_survey(context, category_info, top_k=3) -> str:
 }}
 ```
 """
-    prompt = prompt_template.format(role=role, persona=persona, processed=processed, category_info=category_info)
+    prompt = prompt_template.format(role=role, persona=persona, processed=processed, 
+                                    category_info=category_info, child_age=child_age)
     return prompt
 
 def extract_examples_from_plan(df_plan_row, cols_examples):
@@ -184,8 +186,8 @@ def create_counselor_family_prompt(i_persona, category_name: str, i_df_plans, ch
     cols_examples = [col for col in i_df_plans.columns if 'example_' in col]
     persona = i_persona
     plan_name = i_df_plans[plan_name].iloc[0]
-    keyword = i_df_plans[category_keywords].iloc[0]
-    description = i_df_plans[category_description].iloc[0]
+    keyword = i_df_plans[plan_keywords].iloc[0]
+    description = i_df_plans[plan_description].iloc[0]
     example_list = extract_examples_from_plan(i_df_plans, cols_examples)
     examples = [f"- {example}" for example in example_list]
     examples = "\n".join(examples)

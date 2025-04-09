@@ -16,6 +16,7 @@ from src.prep_map_survey import FamilyPersona
 from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only
 from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
 from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file
+import shutil
 #load_and_parse_json_data, levenshtein_distance,save_dialogue_to_file
 # .env 파일에서 환경 변수 불러오기
 load_dotenv()
@@ -116,11 +117,6 @@ def main(cfg: AppConfig) -> None:
     data_plan_path = data_prep_path / Path('preped_plan.csv') 
     df_plan = pd.read_csv(data_plan_path, encoding='utf-8-sig')
     #map_plan = df_plan[[plan_id, plan_name_english]]
-    
-    
-    import shutil
-    
-
     # --- 매핑 생성 (함수 호출, 변수명 변경) --- 
     category_id_to_name, category_name_to_id = create_category_id_mappings(df)
     
@@ -358,9 +354,9 @@ def main(cfg: AppConfig) -> None:
             'plan_effect_list': plans_effect,
             'child_age': child_age,
             # 처음 3개의 추천 플랜 ID를 개별 컬럼으로 추가 (안전하게 처리)
-            'LLM_plan_rec_1': plans_id[0] if plans_id else None,  # 리스트가 비어있지 않으면 첫 번째 값
-            'LLM_plan_rec_2': plans_id[1] if len(plans_id) > 1 else None,  # 두 번째 값이 있으면 사용
-            'LLM_plan_rec_3': plans_id[2] if len(plans_id) > 2 else None   # 세 번째 값이 있으면 사용
+            'llm_plan_rec_1': plans_id[0] if plans_id else None,  # 리스트가 비어있지 않으면 첫 번째 값
+            'llm_plan_rec_2': plans_id[1] if len(plans_id) > 1 else None,  # 두 번째 값이 있으면 사용
+            'llm_plan_rec_3': plans_id[2] if len(plans_id) > 2 else None   # 세 번째 값이 있으면 사용
         }
         
         # 단일 행 DataFrame 생성 (이제 리스트가 값으로 들어감)

@@ -9,6 +9,7 @@ from pathlib import Path
 #     '공감': 'Empathy'
 # }
 category_to_english = {
+    '입문': 'intro',
     '발달_단계_연령_중심': 'developmental_age_focused',
     '시기_생활_이벤트_중심': 'life_event_focused',
     '부모_양육자_대화_및_자기관리': 'parent_communication_selfcare',
@@ -86,9 +87,9 @@ plan_name = 'plan_name'
 plan_name_english = 'plan_name_english'
 
 plan_keywords = 'parenting_worries'
-course_description = 'course_description'
+plan_description = 'course_description'
 
-cols_text = [plan_keywords, course_description] #, 'parenting_env', 'tag']
+cols_text = [plan_keywords, plan_description] #, 'parenting_env', 'tag']
 
 category_keywords = 'concatenated_keywords'
 category_description = 'concatenated_descriptions'
@@ -240,7 +241,7 @@ def prep_category(df, columns_to_keep=cols_category):
     concatenated_descriptions = {}
     for i_key in df[category_id].unique():
         i_df = df[df[category_id] == i_key]
-        unique_descriptions = i_df[course_description].unique()
+        unique_descriptions = i_df[plan_description].unique()
         concatenated_descriptions[i_key] = ' '.join(unique_descriptions)
     df[category_description] = df[category_id].map(concatenated_descriptions)
 
@@ -298,7 +299,7 @@ def main():
     output_path = data_prep_path / Path('metadata_plan_all.csv')
     df = prep_metadata(df=df, output_path = output_path, is_print=True)
 # For recommendation
-    df = df[df[category_id]!=0] # remove 입문 플랜
+    #df = df[df[category_id]!=0] # remove 입문 플랜
     plan_path = data_prep_path / Path('preped_plan.csv')
     df.to_csv(plan_path, index=False, encoding='utf-8-sig')
     # dict_category = result['pairs']['id_category_CategoryName_English']
