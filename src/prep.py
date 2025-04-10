@@ -260,29 +260,3 @@ def find_persona(i, folder_path="."):
         raise FileNotFoundError(f"{file_pattern} 파일을 찾을 수 없습니다.")
         return None
     
-
-def save_response_to_file(output_path: str, data: Dict[str, Any], family_id: int) -> None:
-    """생성된 대화 데이터를 파일로 저장합니다."""
-    with open(output_path, 'w', encoding='utf-8') as f:
-        # 메타데이터 작성
-        f.write(f"# Family Id: {family_id}\n")
-        # JSON 데이터 저장
-        json.dump(data, f, ensure_ascii=False, indent=2)
-def save_dialogue_to_file(output_path: str, dialogue_data: Dict[str, Any], category_id: str, plan_id: str, examples: str) -> None:
-    """생성된 대화 데이터를 파일로 저장합니다."""
-    with open(output_path, 'w', encoding='utf-8') as f:
-        # 메타데이터 작성
-        f.write(f"# 카테고리: {category_id}\n")
-        f.write(f"# 플랜: {plan_id}\n")
-        f.write("# 사용된 예시 문장:\n")
-        
-        # examples가 문자열일 경우 각 줄을 처리
-        if isinstance(examples, str):
-            clean_examples = examples.strip().split('\n')
-            for example in clean_examples:
-                if example.strip():  # 빈 줄 제외
-                    f.write(f"{example}\n")
-        f.write("\n")
-        
-        # JSON 데이터 저장
-        json.dump(dialogue_data, f, ensure_ascii=False, indent=2)

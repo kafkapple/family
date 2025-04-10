@@ -8,3 +8,6 @@ requests
 python-Levenshtein
 Jinja2
 langchain-ollama
+anthropic
+gemini-api
+google-generativeai

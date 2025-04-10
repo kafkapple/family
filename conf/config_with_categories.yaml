@@ -1,35 +1,29 @@
 # conf/config_with_categories.yaml
 yaml_path: ${hydra:runtime.cwd}/plans.yaml
 llm_provider: 'ollama'
-model_name: gemma3 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
+model_name: gemma3:12b #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf #gemma3 # gpt-3.5-turbo  # OpenAI: 'gpt-3.5-turbo', 'gpt-4' / Ollama: 'llama2', 'mistral' 등
 #hf.co/case01/llama-3.2-Korean-Bllossom-AICA-5B-gguf:latest     0f5688cf9681    9.4 GB    4 weeks ago    
 #hf.co/QuantFactory/llama-3.2-Korean-Bllossom-3B-GGUF:latest 
-
-#example_count: 10  # 선택할 예시 문장 수
-# categories:
-#   - developmental_age_focused
-#   - seasonal_life_events
-#   - parent_caregiver_dialogue
-#   - emotion_needs_understanding
-#   - discipline_boundary_setting
-#   - self_help_independence
-#   - play_interaction
-#   - media_related
-#   - relationship_communication
 
 model:
   type: ${llm_provider}
   name: ${model_name}
+  
+
   parameters:
     temperature: 0.1
     max_tokens: 3000
     top_p: 0.8 # 0.9
-    top_k: 10 #30
-    repeat_penalty: 1.8 # 
-    frequency_penalty: 0.4
-    presence_penalty: 0.2 #0.3
     timeout: 30
     stop: null
+
+    ollama:
+      top_k: 10 #30
+      repeat_penalty: 1.8 # 
+      frequency_penalty: 0.4
+      presence_penalty: 0.2 #0.3
+      
+ 
 
 data:
   exclude_plans: intro #basic # intro 가 기본
@@ -165,3 +159,16 @@ output_formats:
           }
         ]
       } 
+
+  
+#example_count: 10  # 선택할 예시 문장 수
+# categories:
+#   - developmental_age_focused
+#   - seasonal_life_events
+#   - parent_caregiver_dialogue
+#   - emotion_needs_understanding
+#   - discipline_boundary_setting
+#   - self_help_independence
+#   - play_interaction
+#   - media_related
+#   - relationship_communication

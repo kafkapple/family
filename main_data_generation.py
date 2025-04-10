@@ -12,11 +12,11 @@ from pathlib import Path
 import pandas as pd
 from src.llm_client import create_llm_client
 from src.llm_interface import call_llm_and_parse_json
-from src.logger import save_llm_prompts_to_txt
+from src.logger import save_llm_prompts_to_txt, call_save_results
 from src.prep_map_survey import FamilyPersona
-from src.prompt import gen_prompt_category_info, generate_category_info_only, generate_category_from_survey, gen_dialogue_prompt, prep_survey_info
+from src.prompt import gen_prompt_category_info,  generate_category_from_survey, gen_dialogue_prompt, prep_survey_info
 from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_id, create_category_id_mappings
-from src.prep import  load_data_from_cfg, sanitize_model_name, create_scoring_mappings, save_response_to_file, save_dialogue_to_file
+from src.prep import  load_data_from_cfg, sanitize_model_name, create_scoring_mappings
 
 import json
 import shutil
@@ -119,7 +119,11 @@ def main(cfg: AppConfig) -> None:
         prompt_category_path = os.path.join(prompt_path, f"{index_persona}_Step_1_{name_param}_prompt.txt")
         save_llm_prompts_to_txt(prompt_family, prompt_category_path)
         i_persona = i_family.get("persona")
-
+        try:
+            i_persona = i_persona[0]
+        except:
+            i_persona = i_persona
+        
         # LLM을 사용하여 카테고리 ID 생성 + 키 검증
         expected_category_keys = [category_id, "explanation", "persona"] # 키 이름 변경: category_index -> category_id, "child", "parent", "age", "gender", "personality"
         family_data = call_llm_and_parse_json(prompt_family, llm_client, expected_keys=expected_category_keys)
@@ -147,14 +151,17 @@ def main(cfg: AppConfig) -> None:
         # 자녀 나이 가져오기 (이제 child_persona는 항상 딕셔너리)
         
         print(f"Child age: {child_age if child_age is not None else '정보 없음'}")
+        child_age = int(child_age)  # NumPy int64를 Python int로 변환
         # 카테고리 ID 유효성 검사 (매핑에 존재하는지 확인)
         if selected_category_id is None or not isinstance(selected_category_id, int) or selected_category_id not in category_id_to_name:
             print(f"Family {i}: LLM이 유효하지 않은 카테고리 ID 반환 '{selected_category_id}' (타입: {type(selected_category_id)}). 다음 가족으로 넘어갑니다.")
             print(f"유효한 ID 목록: {list(category_id_to_name.keys())}")
             print(f"LLM 응답: {family_data}")
             # 결과 저장 (오류 분석용)
-            output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_INVALID_{selected_category_id}_{name_param}.json")
-            save_response_to_file(output_file, family_data, i)
+            output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_INVALID_{selected_category_id}_{name_param}")
+            #save_response_to_file(output_file, family_data, i)
+            family_data ={"persona_given": i_persona, "age": child_age, "category_id": selected_category_id, "explanation": family_data.get("explanation", ""), "persona": family_data.get("persona", {})}
+            call_save_results(family_data, output_file)
             continue 
             
         # 유효한 ID를 사용하여 실제 카테고리 이름(문자열) 가져오기
@@ -163,8 +170,11 @@ def main(cfg: AppConfig) -> None:
         print(f"\n=== 카테고리: {i_category_name} (ID: {selected_category_id}) ===")
         
         # 결과 저장 (정상 처리 시)
-        output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{selected_category_id}_{name_param}.json")
-        save_response_to_file(output_file, family_data, i)
+        output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_{selected_category_id}_{name_param}")
+        #save_response_to_file(output_file, family_data, i)
+
+        family_data = {"persona_id": i, "persona": i_persona, "age": child_age, **family_data}
+        call_save_results(family_data, output_file)
         # prep_map_category 임포트 위치 변경 (필요 시점)
         try:
             # df_plan 필터링 시 category_id 대신 category_name 사용
@@ -200,12 +210,19 @@ def main(cfg: AppConfig) -> None:
                 dialogue_data = call_llm_and_parse_json(prompt, llm_client, expected_keys=expected_dialogue_keys)
                 
                 if dialogue_data:
-                    print(f"생성된 대화 데이터:")
-                    print(json.dumps(dialogue_data, ensure_ascii=False, indent=2))
+                    # print(f"생성된 대화 데이터:")
+                    # print(json.dumps(dialogue_data, ensure_ascii=False, indent=2))
                     
-                    output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}.json")
-                    save_dialogue_to_file(output_file, dialogue_data, i_category_name, plan, examples)
-             
+                    output_file = os.path.join(output_dialogue_path, f"{index_plan_dialogue}")
+                    #save_dialogue_to_file(output_file, dialogue_data, i, i_persona, examples)
+                
+                    dialogue_data = {"persona_id": i, "persona": i_persona, "age": dialogue_data['age'],
+                    "explanation": dialogue_data['explanation'],
+                    "category": dialogue_data['category'],
+                    "plan": dialogue_data['plan'],
+                    "examples": examples,
+                    "dialogue": dialogue_data['dialogue']} 
+                    call_save_results(dialogue_data, output_file)
                     print(f"\n대화가 '{output_file}'에 저장되었습니다.")
                 else:
                     print("대화 생성에 실패했습니다.")
