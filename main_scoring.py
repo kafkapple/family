@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 from src.llm_client import create_llm_client
 from src.llm_interface import call_llm_and_parse_json
-from src.logger import save_llm_prompts_to_txt, save_response_to_file
+from src.logger import save_llm_prompts_to_txt, call_save_results #save_response_to_file
 from src.prep_map_survey import FamilyPersona
 from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only, prep_survey_info
 from src.prep_map_category import plan_id, plan_name, category_id, category_name_english, create_category_id_mappings
@@ -186,7 +186,9 @@ def main(cfg: AppConfig) -> None:
                         output_scoring_path,
                         f"{index_persona}_Step_3_Scoring_{name_param}.json"
                     )
-                    save_response_to_file(output_file, scoring_data, i)
+
+                    scoring_data = {"persona_id": i, "persona": i_persona, "age": child_age, **scoring_data}
+                    call_save_results(scoring_data, output_file)
 
     
                     print(f"스코어링 결과 저장됨: {output_file}")
@@ -223,7 +225,8 @@ def main(cfg: AppConfig) -> None:
                                 output_category_path,
                                 f"{index_persona}_Step_4_Category_{name_param}.json"
                             )
-            save_response_to_file(output_file, category_data, i)
+            category_data = {"persona_id": i, "persona": i_persona, "age": child_age, **category_data}
+            call_save_results(category_data, output_file)
             print(f"카테고리 결과 저장됨: {output_file}")
 
             ####### 플랜 추천 로직 시작 #######
@@ -277,7 +280,8 @@ def main(cfg: AppConfig) -> None:
                             output_final_path,
                             f"{index_persona}_Step_5_Plan_{name_param}.json"
                         )
-        save_response_to_file(output_file, plan_data, i)
+        plan_data = {"persona_id": i, "persona": i_persona, "age": child_age, **plan_data}
+        call_save_results(plan_data, output_file)
         print(f"플랜 추천 결과 저장됨: {output_file}")
         ###
         # 결과 취합 로직 수정: 리스트들을 먼저 추출하고 merged_dict에 포함

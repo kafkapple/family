@@ -106,7 +106,7 @@ def prep_survey_info(context,  top_k=3) -> str:
     return processed
 
 def generate_category_from_survey(context, category_info, child_age, top_k=3) -> str:
-    persona = context.get('persona')
+    persona = context.get('personas')
     processed = prep_survey_info(context, top_k)
     
     prompt_template = """
@@ -136,14 +136,14 @@ def generate_category_from_survey(context, category_info, child_age, top_k=3) ->
 - 반드시 다음 JSON 형식에 맞춰 결과를 출력해 주세요.
 - **`category_id` 필드에는 선택한 카테고리의 ID(정수)를 넣어야 합니다.**
 - **`explanation` 필드는 아래 예시와 같이 반드시 한국어로, 선택 이유를 상세히 기술해야 합니다.**
-- **`persona` 필드는 자녀와 양육자의 페르소나 정보를 포함해야 합니다.**
+- **`personas` 필드는 자녀와 양육자의 페르소나 정보를 포함해야 합니다.**
 - 모든 문자열 값은 큰따옴표("")로 감싸야 합니다.
 - JSON 객체 외에 다른 텍스트는 포함하지 마세요.
 ```json
 {{
   "category_id": int, // 예: 101 (카테고리 ID)
   "explanation": "string" // 예: "가족 페르소나의 OOO 측면과 우선순위 관심사 중 XX 키워드가 카테고리 ID 101(life_event_focused)의 설명 및 키워드와 가장 관련성이 높아 선택했습니다."
-  "persona": {{
+  "personas": {{
     "child": [{{
         "name": "string", // 자녀 이름
         "age": "string", // 자녀 나이

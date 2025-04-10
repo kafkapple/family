@@ -134,9 +134,9 @@ def main(cfg: AppConfig) -> None:
         
         selected_category_id = family_data.get("category_id") # 키 이름 변경: category_index -> category_id
         # 페르소나 정보 가져오기 (NoneType 오류 방지)
-        family_persona = family_data.get("persona")
+        family_persona = family_data.get("personas")
         if family_persona is None or not isinstance(family_persona, dict):
-            print(f"경고: Family {i}의 LLM 응답에서 유효한 'persona' 딕셔너리를 찾을 수 없습니다. 기본값을 사용합니다.")
+            print(f"경고: Family {i}의 LLM 응답에서 유효한 'personas' 딕셔너리를 찾을 수 없습니다. 기본값을 사용합니다.")
             print(f"   LLM 응답 (family_data): {family_data}")
             child_persona = {} # 기본 빈 딕셔너리
             parent_persona = {} # 기본 빈 딕셔너리
@@ -160,8 +160,7 @@ def main(cfg: AppConfig) -> None:
             # 결과 저장 (오류 분석용)
             output_file = os.path.join(output_persona_path,  f"{index_persona}_Step_1_Cat_INVALID_{selected_category_id}_{name_param}")
             #save_response_to_file(output_file, family_data, i)
-            family_data ={"persona_given": i_persona, "age": child_age, "category_id": selected_category_id, "explanation": family_data.get("explanation", ""), "persona": family_data.get("persona", {})}
-            call_save_results(family_data, output_file)
+            
             continue 
             
         # 유효한 ID를 사용하여 실제 카테고리 이름(문자열) 가져오기
