@@ -106,7 +106,7 @@ def main(cfg: AppConfig) -> None:
         print(f"\n================================{index_persona}================================")
         i_df= df_survey.iloc[i,:]
         i_family = family.get_persona_data(i)
-        child_age = i_df['아이 연령']
+        child_age = int(i_df['아이 연령'])
 
         df_category = df[df['min_month'] <= child_age]
         df_category = df_category[df_category['max_month'] >= child_age]
@@ -150,8 +150,7 @@ def main(cfg: AppConfig) -> None:
 
         # 자녀 나이 가져오기 (이제 child_persona는 항상 딕셔너리)
         
-        print(f"Child age: {child_age if child_age is not None else '정보 없음'}")
-        child_age = int(child_age)  # NumPy int64를 Python int로 변환
+        print(f"Child age: {child_age if child_age is not None else '정보 없음'}") # NumPy int64를 Python int로 변환
         # 카테고리 ID 유효성 검사 (매핑에 존재하는지 확인)
         if selected_category_id is None or not isinstance(selected_category_id, int) or selected_category_id not in category_id_to_name:
             print(f"Family {i}: LLM이 유효하지 않은 카테고리 ID 반환 '{selected_category_id}' (타입: {type(selected_category_id)}). 다음 가족으로 넘어갑니다.")

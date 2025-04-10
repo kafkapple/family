@@ -114,7 +114,7 @@ def main(cfg: AppConfig) -> None:
         i_df= df_survey.iloc[i,:]
         i_family = family.get_persona_data(i)
         i_survey_info = prep_survey_info(i_family, top_k=cfg.prompt.top_k)
-        child_age = i_df['아이 연령']
+        child_age = int(i_df['아이 연령'])
 
         df_category = df[df['min_month'] <= child_age]
         df_category = df_category[df_category['max_month'] >= child_age]
@@ -137,6 +137,10 @@ def main(cfg: AppConfig) -> None:
 
         # i_family = family.get_persona_data(i)
         i_persona = i_family.get("persona")
+        try:
+            i_persona = i_persona[0]
+        except:
+            i_persona = i_persona
 
         # --- 스코어링 로직 시작 --- (for plan 루프 안으로 이동)
         ######################
