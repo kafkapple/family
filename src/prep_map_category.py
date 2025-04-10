@@ -314,7 +314,34 @@ def main():
     column_pairs = [ (category_id, category_name_english), (plan_id, plan_name_english)]#, (theme_id, theme_name_english)]
     result = extract_unique_index_name_pairs(df, column_pairs=column_pairs)
     print_keys_and_values(result)
+
+from typing import Tuple, Dict
+# --- 매핑 함수 정의 --- 
+def create_category_id_mappings(df_category: pd.DataFrame) -> Tuple[Dict[int, str], Dict[str, int]]:
+    """카테고리 DataFrame에서 id_category <-> CategoryName_English 매핑을 생성합니다."""
+    # CategoryName_English를 기준으로 중복 제거 후 매핑 생성
+    df_unique_categories = df_category.drop_duplicates(subset=[category_name_english])
     
+    # id_category 컬럼이 정수형인지 확인 (필요시 타입 변환)
+    if not pd.api.types.is_integer_dtype(df_unique_categories[category_id]):
+        print("경고: id_category 컬럼이 정수형이 아닙니다. 변환을 시도합니다.")
+        try:
+            df_unique_categories[category_id] = df_unique_categories[category_id].astype(int)
+        except ValueError as e:
+            print(f"오류: id_category를 정수형으로 변환할 수 없습니다: {e}")
+            raise
+            
+    category_id_to_name = pd.Series(
+        df_unique_categories[category_name_english].values, 
+        index=df_unique_categories[category_id]
+    ).to_dict()
+    
+    category_name_to_id = {name: id_ for id_, name in category_id_to_name.items()}
+    
+    print(f"카테고리 ID <-> 이름 매핑 생성 완료: {len(category_id_to_name)}개")
+    # print(f"ID to Name: {category_id_to_name}") # 필요시 주석 해제
+    return category_id_to_name, category_name_to_id
+# --- JSON 키 검증/수정 함수 끝 --- 
 
 if __name__ == '__main__':
     main()

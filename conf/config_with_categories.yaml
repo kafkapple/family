@@ -35,16 +35,18 @@ data:
   exclude_plans: intro #basic # intro 가 기본
 
 prompt:
-  top_k: 6
+  top_k: 3
   dialogue:
     is_survey: true
     is_keywords: true
     is_example: true
     is_description: false
+    n_plan: 1
+    top_k: 6
   scoring:
     detailed_criteria: false
   category:
-    enabled: true
+    enabled: false
     is_survey: true
   plan:
     is_survey: true

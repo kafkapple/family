@@ -119,6 +119,8 @@ def generate_category_from_survey(context, category_info, child_age, top_k=3) ->
 - 제공된 가족 정보([Family Persona], [Priority Interests])와 [카테고리 정보]를 종합적으로 고려하세요.
 - **`explanation` 필드는 반드시 한국어로만 작성해야 합니다. 영어 단어나 문장을 사용하지 마세요.**
 - 아이 나이는 주어진 정보를 바탕으로, 각 나이에 맞는 언어를 구사해야 합니다.
+- 특히 Family Persona, Priority Interests 정보를 주의 깊게 고려해, 세부 persona 생성 및 카테고리를 선택해 주세요.
+
 # Context
 ### Family Persona
 - 아이 나이: {child_age} 개월
@@ -189,7 +191,7 @@ def extract_examples_from_plan(df_plan_row, cols_examples):
                 examples.append(clean_example)
     return examples
 
-def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_persona, parent_persona, is_keywords: bool = False, is_description: bool = False, is_example: bool = False) -> str:
+def gen_dialogue_prompt(i_persona, processed_survey, i_category_name: str, i_df_plans, child_persona, parent_persona, is_keywords: bool = False, is_description: bool = False, is_example: bool = False) -> str:
     """심리 상담사 프롬프트를 생성합니다. (카테고리 이름을 직접 받도록 수정)"""
     global role
     cols_examples = [col for col in i_df_plans.columns if 'example_' in col]
@@ -216,6 +218,8 @@ def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_perso
 {role}
 # Instruction
 - 자주 경험했던 부모와 아이, 또는 양육자 간의 다양한 갈등, 부정적인 대화를 떠올려 자연스럽게 재구성해 주세요.
+- 특히 [Family Persona], [Priority Interests] 정보를 우선적으로 주의 깊게 고려해, 세부 persona 생성 및 카테고리를 선택해 주세요.
+- [Priority Interests] 정보는 양육자가 설문으로 응답한 관심사 및 키워드를 우선순위 순서대로 나열한 것입니다.
 - 대화는 총 5 ~ 15 턴 내외로 생성해 주세요.
 - 이모지, 특수 문자 등은 사용하지 않습니다.
 - 모두 한국어로 작성해 주세요.
@@ -224,11 +228,11 @@ def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_perso
 - 등장 인물은 양육자인 엄마, 아빠, 아이들, 주변 인물 중, 주어진 맥락에 적절한 1-3인을 선택해 주세요.
 - 특히 양육자 부모의 부정적인 태도가 잘 드러날 수록 좋습니다.
 - 아이의 나이는 주어진 정보를 바탕으로, 각 나이에 맞는 언어를 구사해야 합니다.
-- 모르는 경우 3세 근처로 가정합니다. (어휘가 부족하고 유창하지 않아야 합니다.)
 - 모든 인물의 성격 및 대화는 일관성을 유지해야 합니다.
 - examples 문장에 담긴 **핵심 의미나 의도**를 반영하는 부모의 발언을 최소 1회 이상 자연스럽게 포함하세요. (반드시 원문 그대로 사용할 필요는 없습니다.)
-- examples 문장은 모두 부모가 아이에게 하는 말입니다.
+- examples 문장은 대부분 부모가 아이에게 하는 말입니다.
 
+[Family Persona]
 ## 가족 페르소나 정보
 {persona}
 
@@ -237,6 +241,10 @@ def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_perso
 
 ## 양육자 페르소나 정보
 {parent_persona}
+
+[Priority Interests]
+## 우선순위 관심사
+{processed_survey}
 
 ## 코칭 플랜
 - 카테고리: {i_category_name} 
@@ -277,7 +285,8 @@ def gen_dialogue_prompt(i_persona, i_category_name: str, i_df_plans, child_perso
         i_description=i_description,
         examples=examples,
         child_persona=child_persona,
-        parent_persona=parent_persona
+        parent_persona=parent_persona,
+        processed_survey=processed_survey
     )
     return prompt, examples
 

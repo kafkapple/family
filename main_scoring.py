@@ -10,12 +10,12 @@ from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
 from src.llm_client import create_llm_client
-from src.llm_interface import get_llm_response
-from src.logger import save_llm_prompts_to_txt, parse_and_save_json_results
+from src.llm_interface import call_llm_and_parse_json
+from src.logger import save_llm_prompts_to_txt
 from src.prep_map_survey import FamilyPersona
 from src.prompt import get_scoring_prompt, get_category_prompt, get_plan_prompt, gen_plan_info, generate_category_info_only, prep_survey_info
-from src.prep_map_category import category_name_english, category_id, plan_name_english, plan_name, plan_id
-from src.prep import parse_json_response,  load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, fix_json_keys,  reconstruct_dialogue, find_persona, save_response_to_file
+from src.prep_map_category import plan_id, plan_name, category_id, category_name_english, create_category_id_mappings
+from src.prep import load_data_from_cfg, load_template_str, sanitize_model_name, create_scoring_mappings, reconstruct_dialogue, find_persona, save_response_to_file
 from src.evaluation import call_metric
 import shutil
 #load_and_parse_json_data, levenshtein_distance,save_dialogue_to_file
@@ -37,68 +37,6 @@ class AppConfig:
 
 cs = ConfigStore.instance()
 cs.store(name="config", node=AppConfig)
-
-def call_llm_and_parse_json(prompt: str, llm_client: Any, max_retries: int = 10, expected_keys: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
-    """LLM을 호출하고 응답을 JSON으로 파싱합니다. 실패 시 재시도하고, 성공 시 키를 검증/수정합니다."""
-    retries = 0
-    while retries < max_retries:
-        response = get_llm_response(prompt, llm_client)
-        if not response:
-            print(f"LLM 응답 없음. 재시도 ({retries + 1}/{max_retries})...")
-            retries += 1
-            time.sleep(1) 
-            continue
-
-        parsed_data = parse_json_response(response)
-        if parsed_data:
-            # JSON 파싱 성공 후 키 검증 및 수정
-            if expected_keys:
-                try:
-                    corrected_data = fix_json_keys(parsed_data, expected_keys)
-                    return corrected_data
-                except Exception as e_fix:
-                    print(f"JSON 키 수정 중 오류 발생: {e_fix}")
-                    print(f"원본 파싱 데이터: {parsed_data}")
-                    # 키 수정 실패 시 파싱 실패로 간주하고 재시도 또는 최종 실패
-                    # return parsed_data # 또는 수정 전 데이터 반환 선택
-            else:
-                 # expected_keys가 없으면 검증/수정 없이 반환
-                 return parsed_data
-        # else 블록은 파싱 실패 시 재시도 로직으로 이어짐
-        print(f"JSON 파싱/키 수정 실패. 재시도 ({retries + 1}/{max_retries})...")
-        if not parsed_data: # 파싱 자체가 실패한 경우만 로그 출력 (키 수정 실패는 위에서 로깅)
-             print(f"실패한 응답: {response[:500]}...") 
-        retries += 1
-        time.sleep(1)
-            
-    print(f"최대 재시도 횟수({max_retries}) 도달. JSON 처리 최종 실패.")
-    return None
-# --- 매핑 함수 정의 --- 
-def create_category_id_mappings(df_category: pd.DataFrame) -> Tuple[Dict[int, str], Dict[str, int]]:
-    """카테고리 DataFrame에서 id_category <-> CategoryName_English 매핑을 생성합니다."""
-    # CategoryName_English를 기준으로 중복 제거 후 매핑 생성
-    df_unique_categories = df_category.drop_duplicates(subset=[category_name_english])
-    
-    # id_category 컬럼이 정수형인지 확인 (필요시 타입 변환)
-    if not pd.api.types.is_integer_dtype(df_unique_categories[category_id]):
-        print("경고: id_category 컬럼이 정수형이 아닙니다. 변환을 시도합니다.")
-        try:
-            df_unique_categories[category_id] = df_unique_categories[category_id].astype(int)
-        except ValueError as e:
-            print(f"오류: id_category를 정수형으로 변환할 수 없습니다: {e}")
-            raise
-            
-    category_id_to_name = pd.Series(
-        df_unique_categories[category_name_english].values, 
-        index=df_unique_categories[category_id]
-    ).to_dict()
-    
-    category_name_to_id = {name: id_ for id_, name in category_id_to_name.items()}
-    
-    print(f"카테고리 ID <-> 이름 매핑 생성 완료: {len(category_id_to_name)}개")
-    # print(f"ID to Name: {category_id_to_name}") # 필요시 주석 해제
-    return category_id_to_name, category_name_to_id
-# --- JSON 키 검증/수정 함수 끝 --- 
 
 @hydra.main(config_path="conf", config_name="config_with_categories")
 def main(cfg: AppConfig) -> None:
@@ -377,7 +315,6 @@ def main(cfg: AppConfig) -> None:
             'llm_plan_rec_2': plans_id[1] if len(plans_id) > 1 else None,  # 두 번째 값이 있으면 사용
             'llm_plan_rec_3': plans_id[2] if len(plans_id) > 2 else None   # 세 번째 값이 있으면 사용
         }
-        
         # 단일 행 DataFrame 생성 (이제 리스트가 값으로 들어감)
         df_i = pd.DataFrame([merged_dict])
         df_i['persona_index'] = i
